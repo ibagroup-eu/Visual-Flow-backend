@@ -19,10 +19,12 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.dao.PodEventRepositoryImpl;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.dto.GraphDto;
 import by.iba.vfapi.dto.LogDto;
 import by.iba.vfapi.dto.ResourceUsageDto;
+import by.iba.vfapi.dto.history.HistoryResponseDto;
 import by.iba.vfapi.dto.jobs.JobOverviewDto;
 import by.iba.vfapi.dto.jobs.JobOverviewListDto;
 import by.iba.vfapi.dto.jobs.JobRequestDto;
@@ -32,6 +34,10 @@ import by.iba.vfapi.dto.projects.ParamsDto;
 import by.iba.vfapi.exceptions.BadRequestException;
 import by.iba.vfapi.exceptions.ConflictException;
 import by.iba.vfapi.exceptions.InternalProcessingException;
+import by.iba.vfapi.model.PodEvent;
+import by.iba.vfapi.services.auth.AuthenticationService;
+import by.iba.vfapi.model.argo.Parameter;
+import by.iba.vfapi.model.argo.WorkflowTemplate;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.ConfigMap;
@@ -51,9 +57,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import javax.validation.Valid;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -69,20 +77,35 @@ public class JobService {
     private final String jobImage;
     private final String jobMaster;
     private final String imagePullSecret;
+    private final String pvcMountPath;
     private final String serviceAccount;
     private final KubernetesService kubernetesService;
+    private final ArgoKubernetesService argoKubernetesService;
+    private final AuthenticationService authenticationService;
+    private final PodService podService;
+    private final PodEventRepositoryImpl podEventRepository;
 
     public JobService(
         @Value("${job.spark.image}") final String jobImage,
         @Value("${job.spark.master}") final String jobMaster,
         @Value("${job.spark.serviceAccount}") final String serviceAccount,
         @Value("${job.imagePullSecret}") final String imagePullSecret,
-        KubernetesService kubernetesService) {
+        @Value("${pvc.mountPath}") final String pvcMountPath,
+        KubernetesService kubernetesService,
+        ArgoKubernetesService argoKubernetesService,
+        final AuthenticationService authenticationService,
+        final PodService podService,
+        PodEventRepositoryImpl podEventRepository) {
         this.jobImage = jobImage;
         this.jobMaster = jobMaster;
         this.serviceAccount = serviceAccount;
         this.imagePullSecret = imagePullSecret;
+        this.pvcMountPath = pvcMountPath;
         this.kubernetesService = kubernetesService;
+        this.argoKubernetesService = argoKubernetesService;
+        this.authenticationService = authenticationService;
+        this.podService = podService;
+        this.podEventRepository = podEventRepository;
     }
 
     /**
@@ -313,6 +336,7 @@ public class JobService {
      * @param id        job id
      */
     public void delete(final String projectId, final String id) {
+        checkJobPresentInPipeline(projectId, id);
         kubernetesService.deleteConfigMap(projectId, id);
         kubernetesService.deletePodsByLabels(projectId, Map.of(Constants.JOB_ID_LABEL, id));
     }
@@ -325,59 +349,7 @@ public class JobService {
      */
     public void run(final String projectId, final String jobId) {
         ConfigMap configMap = kubernetesService.getConfigMap(projectId, jobId);
-        Pod pod = new PodBuilder()
-            .withNewMetadata()
-            .withName(jobId)
-            .withNamespace(projectId)
-            .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-            .addToLabels(Constants.JOB_ID_LABEL, jobId)
-            .endMetadata()
-            .withNewSpec()
-            .withServiceAccountName(serviceAccount)
-            .withNewSecurityContext()
-            .withRunAsGroup(K8sUtils.GROUP_ID)
-            .withRunAsUser(K8sUtils.USER_ID)
-            .endSecurityContext()
-            .addNewContainer()
-            .withName(K8sUtils.JOB_CONTAINER)
-            .withEnv(new EnvVarBuilder()
-                         .withName("POD_IP")
-                         .withNewValueFrom()
-                         .editOrNewFieldRef()
-                         .withApiVersion("v1")
-                         .withFieldPath("status.podIP")
-                         .endFieldRef()
-                         .endValueFrom()
-                         .build(),
-                     new EnvVarBuilder().withName("IMAGE_PULL_SECRETS").withValue(imagePullSecret).build(),
-                     new EnvVarBuilder().withName("JOB_MASTER").withValue(jobMaster).build(),
-                     new EnvVarBuilder().withName("POD_NAME").withValue(jobId).build(),
-                     new EnvVarBuilder().withName("JOB_ID").withValue(jobId).build(),
-                     new EnvVarBuilder()
-                         .withName("PIPELINE_JOB_ID")
-                         .withValue(Constants.NOT_PIPELINE_FLAG)
-                         .build(),
-                     new EnvVarBuilder().withName("JOB_IMAGE").withValue(jobImage).build(),
-                     new EnvVarBuilder().withName("POD_NAMESPACE").withValue(projectId).build())
-            .withEnvFrom(new EnvFromSourceBuilder()
-                             .withNewConfigMapRef()
-                             .withName(jobId)
-                             .endConfigMapRef()
-                             .build(),
-                         new EnvFromSourceBuilder()
-                             .withNewSecretRef()
-                             .withName(ParamsDto.SECRET_NAME)
-                             .endSecretRef()
-                             .build())
-            .withResources(K8sUtils.getResourceRequirements(configMap.getData()))
-            .withCommand("/opt/spark/work-dir/entrypoint.sh")
-            .withImage(jobImage)
-            .withImagePullPolicy("Always")
-            .endContainer()
-            .addNewImagePullSecret(imagePullSecret)
-            .withRestartPolicy("Never")
-            .endSpec()
-            .build();
+        Pod pod = initializePod(projectId, jobId, configMap);
         try {
             kubernetesService.deletePod(projectId, jobId);
             kubernetesService.deletePodsByLabels(projectId, Map.of(Constants.JOB_ID_LABEL,
@@ -390,6 +362,7 @@ public class JobService {
             LOGGER.info(KubernetesService.NO_POD_MESSAGE, e);
         }
 
+        podService.trackPodEvents(projectId, jobId);
         kubernetesService.createPod(projectId, pod);
     }
 
@@ -419,5 +392,136 @@ public class JobService {
      */
     public List<LogDto> getJobLogs(String projectId, String id) {
         return kubernetesService.getParsedPodLogs(projectId, id);
+    }
+
+    /**
+     * Retrieve job history
+     *
+     * @param projectId project id
+     * @param id        job id
+     * @return list of history
+     */
+    public List<HistoryResponseDto> getJobHistory(String projectId, String id) {
+
+        Map<String, PodEvent> events = podEventRepository.findAll(projectId + "_" + id);
+
+        return events
+                .values()
+                .stream()
+                .map(podEvent -> HistoryResponseDto
+                        .builder()
+                        .id(podEvent.getId())
+                        .flag(podEvent.getFlag())
+                        .status(podEvent.getStatus())
+                        .startedAt(podEvent.getStartedAt())
+                        .finishedAt(podEvent.getFinishedAt())
+                        .startedBy(podEvent.getStartedBy())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Initialize pod
+     *
+     * @param projectId  project id
+     * @param jobId      job id
+     * @param configMap  config map
+     * @return pod
+     */
+    private Pod initializePod(String projectId, String jobId, ConfigMap configMap) {
+        return new PodBuilder()
+                .withNewMetadata()
+                .withName(jobId)
+                .withNamespace(projectId)
+                .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
+                .addToLabels(Constants.JOB_ID_LABEL, jobId)
+                .addToLabels(Constants.STARTED_BY, authenticationService.getUserInfo().getUsername())
+                .endMetadata()
+                .withNewSpec()
+                .withServiceAccountName(serviceAccount)
+                .withNewSecurityContext()
+                .withRunAsGroup(K8sUtils.GROUP_ID)
+                .withRunAsUser(K8sUtils.USER_ID)
+                .endSecurityContext()
+                .addNewContainer()
+                .withName(K8sUtils.JOB_CONTAINER)
+                .withEnv(new EnvVarBuilder()
+                                .withName("POD_IP")
+                                .withNewValueFrom()
+                                .editOrNewFieldRef()
+                                .withApiVersion("v1")
+                                .withFieldPath("status.podIP")
+                                .endFieldRef()
+                                .endValueFrom()
+                                .build(),
+                        new EnvVarBuilder().withName("IMAGE_PULL_SECRETS").withValue(imagePullSecret).build(),
+                        new EnvVarBuilder().withName("JOB_MASTER").withValue(jobMaster).build(),
+                        new EnvVarBuilder().withName("POD_NAME").withValue(jobId).build(),
+                        new EnvVarBuilder().withName("PVC_NAME").withValue(K8sUtils.PVC_NAME).build(),
+                        new EnvVarBuilder().withName("MOUNT_PATH").withValue(pvcMountPath).build(),
+                        new EnvVarBuilder().withName("JOB_ID").withValue(jobId).build(),
+                        new EnvVarBuilder()
+                                .withName("PIPELINE_JOB_ID")
+                                .withValue(Constants.NOT_PIPELINE_FLAG)
+                                .build(),
+                        new EnvVarBuilder().withName("JOB_IMAGE").withValue(jobImage).build(),
+                        new EnvVarBuilder().withName("POD_NAMESPACE").withValue(projectId).build())
+                .withEnvFrom(new EnvFromSourceBuilder()
+                                .withNewConfigMapRef()
+                                .withName(jobId)
+                                .endConfigMapRef()
+                                .build(),
+                        new EnvFromSourceBuilder()
+                                .withNewSecretRef()
+                                .withName(ParamsDto.SECRET_NAME)
+                                .endSecretRef()
+                                .build())
+                .withResources(K8sUtils.getResourceRequirements(configMap.getData()))
+                .withCommand("/opt/spark/work-dir/entrypoint.sh")
+                .withImage(jobImage)
+                .withImagePullPolicy("Always")
+                .addNewVolumeMount()
+                .withName("spark-pvc-volume")
+                .withMountPath(pvcMountPath)
+                .endVolumeMount()
+                .endContainer()
+                .addNewVolume()
+                .withName("spark-pvc-volume")
+                .withNewPersistentVolumeClaim()
+                .withClaimName(K8sUtils.PVC_NAME)
+                .endPersistentVolumeClaim()
+                .endVolume()
+                .addNewImagePullSecret(imagePullSecret)
+                .withRestartPolicy("Never")
+                .endSpec()
+                .build();
+    }
+
+    /**
+     * Check if the job presents in the pipeline before delete it
+     *
+     * @param projectId  project id
+     * @param jobId      job id
+     */
+    protected void checkJobPresentInPipeline(String projectId, String jobId) {
+        List<WorkflowTemplate> workflowTemplates = argoKubernetesService.getAllWorkflowTemplates(projectId);
+        for (WorkflowTemplate workflowTemplate : workflowTemplates) {
+            PipelineService
+                    .getDagTaskFromWorkflowTemplateSpec(workflowTemplate.getSpec())
+                    .stream()
+                    .map(task -> task
+                            .getArguments()
+                            .getParameters()
+                            .stream()
+                            .filter(param -> K8sUtils.CONFIGMAP.equals(param.getName()))
+                            .findFirst())
+                    .filter(Optional::isPresent)
+                    .forEach((Optional<Parameter> parameter) -> {
+                        if (jobId.equals(parameter.get().getValue())) {
+                            throw new BadRequestException("The job is still used in pipeline "
+                                    + workflowTemplate.getMetadata().getLabels().get("name"));
+                        }
+                    });
+        }
     }
 }

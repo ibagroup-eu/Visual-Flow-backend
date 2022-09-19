@@ -19,9 +19,11 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.dao.PodEventRepositoryImpl;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.dto.LogDto;
 import by.iba.vfapi.dto.ResourceUsageDto;
+import by.iba.vfapi.dto.history.HistoryResponseDto;
 import by.iba.vfapi.dto.jobs.JobOverviewDto;
 import by.iba.vfapi.dto.jobs.JobOverviewListDto;
 import by.iba.vfapi.dto.jobs.JobRequestDto;
@@ -29,6 +31,17 @@ import by.iba.vfapi.dto.jobs.JobResponseDto;
 import by.iba.vfapi.dto.jobs.PipelineJobOverviewDto;
 import by.iba.vfapi.exceptions.BadRequestException;
 import by.iba.vfapi.exceptions.ConflictException;
+import by.iba.vfapi.model.JobParams;
+import by.iba.vfapi.model.PodEvent;
+import by.iba.vfapi.model.auth.UserInfo;
+import by.iba.vfapi.services.auth.AuthenticationService;
+import by.iba.vfapi.model.argo.WorkflowTemplate;
+import by.iba.vfapi.model.argo.DagTemplate;
+import by.iba.vfapi.model.argo.WorkflowTemplateSpec;
+import by.iba.vfapi.model.argo.DagTask;
+import by.iba.vfapi.model.argo.Arguments;
+import by.iba.vfapi.model.argo.Parameter;
+import by.iba.vfapi.model.argo.Template;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -45,6 +58,7 @@ import io.fabric8.kubernetes.api.model.metrics.v1beta1.PodMetricsBuilder;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.ResourceNotFoundException;
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.apache.commons.codec.binary.Base64;
@@ -57,6 +71,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
@@ -115,11 +130,20 @@ class JobServiceTest {
 
     @Mock
     private KubernetesService kubernetesService;
+    @Mock
+    private ArgoKubernetesService argoKubernetesService;
+    @Mock
+    private AuthenticationService authenticationService;
+    @Mock
+    private PodService podService;
+    @Mock
+    private PodEventRepositoryImpl podEventRepository;
     private JobService jobService;
 
     @BeforeEach
     void setUp() {
-        this.jobService = new JobService("image", "master", "spark", "pullSecret", kubernetesService);
+        this.jobService = new JobService("image", "master", "spark", "pullSecret", "mountPath",
+            kubernetesService, argoKubernetesService, authenticationService, podService, podEventRepository);
     }
 
     @Test
@@ -134,12 +158,16 @@ class JobServiceTest {
             "projectId",
             JobRequestDto
                 .builder()
-                .params(Map.of("param1",
-                               "value1",
-                               Constants.EXECUTOR_MEMORY,
-                               "1",
-                               Constants.DRIVER_MEMORY,
-                               "1"))
+                .params(new JobParams()
+                        .driverCores("1")
+                        .driverMemory("1")
+                        .driverRequestCores("1")
+                        .executorCores("1")
+                        .executorInstances("1")
+                        .executorMemory("1")
+                        .executorRequestCores("1")
+                        .shufflePartitions("2")
+                        .tags(List.of("value1", "value2")))
                 .name("name")
                 .definition(GRAPH)
                 .build());
@@ -163,7 +191,7 @@ class JobServiceTest {
                                                                                          new ConfigMap()));
 
         JobRequestDto build =
-            JobRequestDto.builder().params(Map.of("param1", "value1")).name("name").definition(GRAPH).build();
+            JobRequestDto.builder().params(new JobParams().executorCores("1")).name("name").definition(GRAPH).build();
         assertThrows(BadRequestException.class,
                      () -> jobService.create("projectId", build),
                      "Expected exception must be thrown");
@@ -187,7 +215,16 @@ class JobServiceTest {
                           JobRequestDto
                               .builder()
                               .definition(GRAPH)
-                              .params(Map.of("param1", "value"))
+                              .params(new JobParams()
+                                      .driverCores("1")
+                                      .driverMemory("1G")
+                                      .driverRequestCores("500m")
+                                      .executorCores("1")
+                                      .executorInstances("1")
+                                      .executorMemory("500M")
+                                      .executorRequestCores("500m")
+                                      .shufflePartitions("2")
+                                      .tags(List.of("value1", "value2")))
                               .name("newName")
                               .build());
 
@@ -210,7 +247,9 @@ class JobServiceTest {
     @Test
     void testGetAll() {
         List<ConfigMap> configMaps = List.of(new ConfigMapBuilder()
-                                                 .addToData(Map.of(Constants.JOB_CONFIG_FIELD,
+                                                 .addToData(Map.of(Constants.TAGS,
+                                                         "value1",
+                                                         Constants.JOB_CONFIG_FIELD,
                                                                    "{\"nodes\":[{\"id\": \"id\", \"value\": " +
                                                                        "{}}], " +
                                                                        "\"edges\":[]}"))
@@ -273,7 +312,7 @@ class JobServiceTest {
                                                                                            .withName(
                                                                                                "pipelinePodName")
                                                                                            .addToLabels(
-                                                                                               Constants.WORKFLOW_POD_LABEL,
+                                                                                               Constants.PIPELINE_ID_LABEL,
                                                                                                "wf1")
                                                                                            .endMetadata()
                                                                                            .withStatus(new PodStatusBuilder()
@@ -306,6 +345,7 @@ class JobServiceTest {
                                            .status("Pending")
                                            .usage(ResourceUsageDto.builder().cpu(0.25f).memory(0.25f).build())
                                            .build()))
+                .tags(List.of("value1"))
             .build();
 
         assertEquals(expected, projectId.getJobs().get(0), "Job must be equals to expected");
@@ -319,6 +359,8 @@ class JobServiceTest {
                               "1G",
                               Constants.DRIVER_MEMORY,
                               "1G",
+                              Constants.TAGS,
+                              "value1,value2",
                               Constants.JOB_CONFIG_FIELD,
                               "{\"nodes\":[], \"edges\":[]}"))
             .withNewMetadata()
@@ -342,7 +384,7 @@ class JobServiceTest {
             .status("Pending")
             .lastModified("lastModified")
             .startedAt("2020-10-27 10:14:46 +0000")
-            .params(Map.of(Constants.EXECUTOR_MEMORY, "1", Constants.DRIVER_MEMORY, "1"))
+            .params(new JobParams().executorMemory("1").driverMemory("1").tags(List.of( "value1", "value2")))
             .build();
 
         assertEquals(expected, jobService.get("projectId", "id"), "Job must be equals to expected");
@@ -369,6 +411,28 @@ class JobServiceTest {
 
         assertEquals(2, logsObjects.size(), "Size must be equals to 2");
         assertEquals(expected, logsObjects.get(0), "Logs must be equal to expected");
+    }
+
+    @Test
+    void testGetHistory() {
+        Map<String, PodEvent> events = new HashMap<>();
+        events.put("1661334380617",
+                new PodEvent("3b6d29b1-f717-4532-8fb6-68b339932253","job", "2022-08-24T09:45:09Z",
+                        "2022-08-24T09:46:19Z","jane-doe" ,"Succeeded"));
+        when(podEventRepository.findAll(anyString())).thenReturn(events);
+
+        List<HistoryResponseDto> historyObjects = jobService.getJobHistory("projectId", "id");
+        HistoryResponseDto expected = HistoryResponseDto
+                .builder()
+                .id("3b6d29b1-f717-4532-8fb6-68b339932253")
+                .flag("job")
+                .status("Succeeded")
+                .startedAt("2022-08-24T09:45:09Z")
+                .finishedAt("2022-08-24T09:46:19Z")
+                .startedBy("jane-doe")
+                .build();
+
+        assertEquals(expected, historyObjects.get(0), "History must be equal to expected");
     }
 
     @Test
@@ -401,7 +465,10 @@ class JobServiceTest {
             Map.of("DRIVER_CORES", "1", "DRIVER_MEMORY", "1G", "DRIVER_REQUEST_CORES", "0.1");
         ConfigMap cm =
             new ConfigMapBuilder().withNewMetadata().withName("name").endMetadata().withData(params).build();
+        UserInfo ui = new UserInfo();
+        ui.setUsername("test_user");
 
+        when(authenticationService.getUserInfo()).thenReturn(ui);
         when(kubernetesService.getConfigMap(projectId, id)).thenReturn(cm);
         doNothing().when(kubernetesService).createPod(eq(projectId), any(Pod.class));
         doNothing().when(kubernetesService).deletePod("projectId", "jobId");
@@ -433,5 +500,50 @@ class JobServiceTest {
                      "Expected exception must be thrown");
 
         verify(kubernetesService, never()).stopPod("projectId", "id");
+    }
+
+    private List<WorkflowTemplate> getMockedWorkflowTemplates() {
+        WorkflowTemplate workflowTemplate = new WorkflowTemplate();
+        workflowTemplate.setMetadata(new ObjectMetaBuilder()
+                .withName("id1")
+                .addToLabels(Constants.NAME, "name1")
+                .addToAnnotations(Constants.DEFINITION,
+                        Base64.encodeBase64String(GRAPH.toString().getBytes()))
+                .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
+                .build());
+        DagTemplate dagTemplate = new DagTemplate();
+        dagTemplate.setTasks(List.of(
+                new DagTask()
+                        .arguments(new Arguments().addParametersItem(new Parameter()
+                                .name("configMap")
+                                .value("jobId")))
+                        .name("pipeline")
+                        .template("sparkTemplate")));
+        workflowTemplate.setSpec(new WorkflowTemplateSpec().templates(List.of(new Template()
+                .name("dagTemplate")
+                .dag(dagTemplate))));
+
+        return List.of(workflowTemplate);
+    }
+
+    @Test
+    void testCheckJobPresentInPipelineThrowsException() {
+        List<WorkflowTemplate> workflowTemplates = getMockedWorkflowTemplates();
+        when(argoKubernetesService.getAllWorkflowTemplates("projectId")).thenReturn(workflowTemplates);
+
+        assertThrows(BadRequestException.class,
+                () -> jobService.checkJobPresentInPipeline("projectId", "jobId"),
+                "Expected exception must be thrown");
+    }
+
+    @Test
+    void testCheckJobPresentInPipelineSuccess() {
+        List<WorkflowTemplate> workflowTemplates = getMockedWorkflowTemplates();
+        when(argoKubernetesService.getAllWorkflowTemplates("projectId")).thenReturn(workflowTemplates);
+
+        jobService.checkJobPresentInPipeline("projectId", "jobId1");
+        verify(argoKubernetesService).getAllWorkflowTemplates("projectId");
+
+        assertDoesNotThrow(() -> jobService.checkJobPresentInPipeline("projectId", "jobId1"));
     }
 }

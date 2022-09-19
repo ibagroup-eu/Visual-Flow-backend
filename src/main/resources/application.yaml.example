@@ -64,6 +64,9 @@ namespace:
     # "[openshift.io/sa.scc.mcs]": "s0:c25,c20"
     # "[openshift.io/sa.scc.supplemental-groups]": "1000/10000"
     # "[openshift.io/sa.scc.uid-range]": "1000/10000"
+pvc:
+  memory: "1Gi"                                   # amount of memory for PVC
+  mountPath: "/files"                             # PVC mount path to upload/download files
 job:
   imagePullSecret:                                # secret in kubernetes to pull jobs images (required). Backend copies this secret to each new namespace(app project)
   spark:
@@ -82,6 +85,12 @@ argo:
   requests:                                       # requests resource quota for argo executor
     cpu: 0.1
     memory: 64Mi
+redis:
+  host: REDIS_HOST                                # The connection host of Redis database.
+  port: REDIS_PORT                                # The connection port of Redis database.
+  username: REDIS_USER                            # The connection username of Redis database.
+  password: REDIS_PASSWORD                        # The connection password of Redis database.
+  database: REDIS_DATABASE                        # The connection database name of Redis database ("0" - by default).
 # Kubernetes Client Http Logs
 # enables logging for kubernetes client
 # feel free to comment the whole block out if you don't need it

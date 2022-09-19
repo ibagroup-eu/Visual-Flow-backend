@@ -44,6 +44,8 @@ public class WorkflowTemplateSpec implements Serializable {
     private List<Template> templates;
     private String serviceAccountName;
     private List<ImagePullSecret> imagePullSecrets;
+    private PipelineParams pipelineParams;
+    private List<Volumes> volumes;
 
     /**
      * Setter for entrypoint.
@@ -92,4 +94,31 @@ public class WorkflowTemplateSpec implements Serializable {
         }
         return this;
     }
+
+    /**
+     * Setter for parametersPipeline.
+     *
+     * @param pipelineParams list of pipelineParams
+     * @return this
+     */
+    public WorkflowTemplateSpec pipelineParams(PipelineParams  pipelineParams) {
+        if (pipelineParams != null) {
+            this.pipelineParams = pipelineParams;
+        }
+        return this;
+    }
+
+    /**
+     * Setter for volumes.
+     *
+     * @param volumes volumes
+     * @return this
+     */
+    public WorkflowTemplateSpec volumes(Collection<Volumes> volumes) {
+        if (volumes != null) {
+            this.volumes = new ArrayList<>(volumes);
+        }
+        return this;
+    }
+
 }

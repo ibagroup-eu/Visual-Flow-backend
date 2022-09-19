@@ -21,6 +21,7 @@ package by.iba.vfapi.controllers;
 
 import by.iba.vfapi.config.OpenApiConfig;
 import by.iba.vfapi.dto.LogDto;
+import by.iba.vfapi.dto.history.HistoryResponseDto;
 import by.iba.vfapi.dto.jobs.JobOverviewDto;
 import by.iba.vfapi.dto.jobs.JobOverviewListDto;
 import by.iba.vfapi.dto.jobs.JobRequestDto;
@@ -186,6 +187,24 @@ public class JobController {
             id,
             projectId);
         return jobService.getJobLogs(projectId, id);
+    }
+
+    /**
+     * Getting job history.
+     *
+     * @param projectId project id
+     * @param id        job id
+     * @return ResponseEntity with list of history objects
+     */
+    @Operation(summary = "Get job history", description = "Get history for a specific job")
+    @GetMapping("{projectId}/job/{id}/history")
+    public List<HistoryResponseDto> getHistory(@PathVariable String projectId, @PathVariable String id) {
+        LOGGER.info(
+                "{} - Receiving job '{}' history in project '{}'",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id,
+                projectId);
+        return jobService.getJobHistory(projectId, id);
     }
 
     /**

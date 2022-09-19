@@ -19,9 +19,11 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.dao.PodEventRepositoryImpl;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.model.argo.CronWorkflow;
 import by.iba.vfapi.model.argo.Workflow;
+import by.iba.vfapi.model.argo.WorkflowList;
 import by.iba.vfapi.model.argo.WorkflowTemplate;
 import by.iba.vfapi.model.argo.WorkflowTemplateList;
 import by.iba.vfapi.model.auth.UserInfo;
@@ -50,11 +52,14 @@ import static org.mockito.Mockito.when;
 class ArgoKubernetesServiceTest {
     private static final String APP_NAME = "vf";
     private static final String APP_NAME_LABEL = "testApp";
+    private static final String PVC_MOUNT_PATH = "/files";
 
     private final KubernetesServer server = new KubernetesServer();
 
     @Mock
     private AuthenticationService authenticationServiceMock;
+    @Mock
+    private PodEventRepositoryImpl podEventRepository;
 
     private ArgoKubernetesService argoKubernetesService;
 
@@ -123,7 +128,7 @@ class ArgoKubernetesServiceTest {
             .andReturn(HttpURLConnection.HTTP_OK, cronWfCrd)
             .once();
         argoKubernetesService =
-            new ArgoKubernetesService(server.getClient(), APP_NAME, APP_NAME_LABEL, authenticationServiceMock);
+            new ArgoKubernetesService(server.getClient(), APP_NAME, APP_NAME_LABEL, PVC_MOUNT_PATH, authenticationServiceMock, podEventRepository);
     }
 
     @AfterEach
@@ -281,6 +286,33 @@ class ArgoKubernetesServiceTest {
 
         assertEquals("id", actual.getMetadata().getName(), "Name must be equals to expected");
         assertEquals("wf", actual.getMetadata().getLabels().get("name"), "Label must be equals to expected");
+    }
+
+    @Test
+    void testGetCronWorkflowsByLabel() {
+        mockAuthenticationService();
+
+        Workflow workflow = new Workflow();
+        workflow.setMetadata(new ObjectMetaBuilder()
+                .withName("id")
+                .addToLabels(Constants.CRON_WORKFLOW_POD_LABEL, "wf")
+                .build());
+
+        WorkflowList workflowList = new WorkflowList().items(List.of(workflow));
+
+        server
+                .expect()
+                .get()
+                .withPath("/apis/argoproj.io/v1alpha1/namespaces/vf/workflows?labelSelector=workflows.argoproj.io%2Fcron-workflow%3Dwf")
+                .andReturn(HttpURLConnection.HTTP_OK, workflowList)
+                .once();
+
+        List<Workflow> actual = argoKubernetesService.getCronWorkflowsByLabel("vf", "wf");
+        assertEquals(1, actual.size(), "Size must be equals to expected");
+        assertEquals("id", actual.get(0).getMetadata().getName(),
+                "Name must be equals to expected");
+        assertEquals("wf", actual.get(0).getMetadata().getLabels().get(Constants.CRON_WORKFLOW_POD_LABEL),
+                "Label must be equals to expected");
     }
 
     @Test

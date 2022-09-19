@@ -24,6 +24,7 @@ import by.iba.vfapi.dto.pipelines.PipelineOverviewDto;
 import by.iba.vfapi.dto.pipelines.PipelineOverviewListDto;
 import by.iba.vfapi.dto.pipelines.PipelineRequestDto;
 import by.iba.vfapi.dto.pipelines.PipelineResponseDto;
+import by.iba.vfapi.model.argo.PipelineParams;
 import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.services.PipelineService;
 import by.iba.vfapi.services.auth.AuthenticationService;
@@ -70,11 +71,13 @@ class PipelineControllerTest {
     @Test
     void testCreate() throws JsonProcessingException {
 
-        when(pipelineService.create("projectId", "name", new ObjectMapper().readTree("{\"graph\":[]}")))
+        when(pipelineService.create("projectId", "name",
+                new ObjectMapper().readTree("{\"graph\":[]}"), new PipelineParams()))
             .thenReturn("id");
         JsonNode graph = new ObjectMapper().readTree("{\"graph\":[]}");
+        PipelineParams params = new PipelineParams();
         ResponseEntity<String> response =
-            pipelineController.create("projectId", new PipelineRequestDto("name", graph));
+            pipelineController.create("projectId", new PipelineRequestDto("name", graph, params));
 
         assertEquals(HttpStatus.CREATED, response.getStatusCode(), "Status must be OK");
         assertEquals("id", response.getBody(), "Body must be equals to Id");
@@ -96,11 +99,14 @@ class PipelineControllerTest {
     void testUpdate() throws JsonProcessingException {
         doNothing()
             .when(pipelineService)
-            .update("projectName", "name", new ObjectMapper().readTree("{\"graph\":[]}"), "newName");
+            .update("projectName", "name", new ObjectMapper().readTree("{\"graph\":[]}"),
+                    new PipelineParams(),"newName");
         JsonNode graph = new ObjectMapper().readTree("{\"graph\":[]}");
-        pipelineController.update("projectName", "name", new PipelineRequestDto("newName", graph));
+        PipelineParams params = new PipelineParams();
+        pipelineController.update("projectName", "name", new PipelineRequestDto("newName", graph, params));
 
-        verify(pipelineService).update(anyString(), anyString(), any(JsonNode.class), anyString());
+        verify(pipelineService).update(anyString(), anyString(), any(JsonNode.class),
+                any(PipelineParams.class), anyString());
     }
 
     @Test

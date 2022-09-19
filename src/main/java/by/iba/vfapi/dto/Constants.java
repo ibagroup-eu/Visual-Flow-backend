@@ -48,6 +48,7 @@ public final class Constants {
     public static final String SPARK_ROLE_LABEL = "spark-role";
     public static final String SPARK_ROLE_EXEC = "executor";
     public static final String WORKFLOW_POD_LABEL = "workflows.argoproj.io/workflow";
+    public static final String CRON_WORKFLOW_POD_LABEL = "workflows.argoproj.io/cron-workflow";
     public static final String PIPELINE_JOB_ID_LABEL = "pipelineJobId";
     public static final String PIPELINE_ID_LABEL = "pipelineId";
     public static final String NOT_PIPELINE_FLAG = "notPipeline";
@@ -59,9 +60,12 @@ public final class Constants {
     public static final String QUOTA_NAME = "quota";
     public static final String GIGABYTE_QUANTITY = "G";
     public static final int USAGE_ACCURACY = 2;
-
+    public static final String EXECUTOR_CORES = "EXECUTOR_CORES";
+    public static final String EXECUTOR_INSTANCES = "EXECUTOR_INSTANCES";
     public static final String EXECUTOR_MEMORY = "EXECUTOR_MEMORY";
-
+    public static final String EXECUTOR_REQUEST_CORES = "EXECUTOR_REQUEST_CORES";
+    public static final String SHUFFLE_PARTITIONS = "SHUFFLE_PARTITIONS";
+    public static final String TAGS = "TAGS";
     public static final String CPU_FIELD = "cpu";
     public static final String MEMORY_FIELD = "memory";
     public static final String DRIVER_CORES = "DRIVER_CORES";
@@ -110,4 +114,5 @@ public final class Constants {
     public static final String SECRETS = "secrets";
     public static final String TOKEN = "token";
     public static final String DOCKERCFG = "dockercfg";
+    public static final String STARTED_BY = "startedBy";
 }

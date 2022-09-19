@@ -20,6 +20,7 @@
 package by.iba.vfapi.exceptions;
 
 import by.iba.vfapi.controllers.ProjectController;
+import io.argoproj.workflow.ApiException;
 import io.fabric8.kubernetes.api.model.Status;
 import io.fabric8.kubernetes.api.model.StatusBuilder;
 import io.fabric8.kubernetes.client.KubernetesClientException;
@@ -33,6 +34,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import javax.validation.ConstraintViolationException;
+
+import static by.iba.vfapi.exceptions.ExceptionsConstants.API_PATH;
+import static by.iba.vfapi.exceptions.ExceptionsConstants.MESSAGE;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -58,45 +63,75 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void testHandleKubernetesClientException() throws Exception {
-        Status status = new StatusBuilder().withStatus("403").withCode(403).withMessage("message").build();
+        Status status = new StatusBuilder().withStatus("403").withCode(403).withMessage(MESSAGE).build();
         KubernetesClientException clientException = new KubernetesClientException(status);
         when(projectController.getAll()).thenThrow(clientException);
 
         mockMvc
-            .perform(get("/api/project"))
+            .perform(get(API_PATH))
             .andExpect(status().isForbidden())
-            .andExpect(content().string("message"));
+            .andExpect(content().string(MESSAGE));
+    }
+
+    @Test
+    void testHandleKubernetesClientExceptionNullStatus() throws Exception {
+        KubernetesClientException clientException = new KubernetesClientException(MESSAGE);
+        when(projectController.getAll()).thenThrow(clientException);
+
+        mockMvc
+                .perform(get(API_PATH))
+                .andExpect(status().isInternalServerError())
+                .andExpect(content().string(MESSAGE));
     }
 
     @Test
     void testHandleResourceNotFoundException() throws Exception {
-        ResourceNotFoundException resourceNotFoundException = new ResourceNotFoundException("message");
+        ResourceNotFoundException resourceNotFoundException = new ResourceNotFoundException(MESSAGE);
         when(projectController.getAll()).thenThrow(resourceNotFoundException);
 
-        mockMvc.perform(get("/api/project")).andExpect(status().isNotFound());
+        mockMvc.perform(get(API_PATH)).andExpect(status().isNotFound());
     }
 
     @Test
     void testHandleConflictException() throws Exception {
-        ConflictException exception = new ConflictException("message");
+        ConflictException exception = new ConflictException(MESSAGE);
         when(projectController.getAll()).thenThrow(exception);
 
-        mockMvc.perform(get("/api/project")).andExpect(status().isConflict());
+        mockMvc.perform(get(API_PATH)).andExpect(status().isConflict());
     }
 
     @Test
     void testHandleBadRequestException() throws Exception {
-        BadRequestException exception = new BadRequestException("message");
+        BadRequestException exception = new BadRequestException(MESSAGE);
         when(projectController.getAll()).thenThrow(exception);
 
-        mockMvc.perform(get("/api/project")).andExpect(status().isBadRequest());
+        mockMvc.perform(get(API_PATH)).andExpect(status().isBadRequest());
     }
 
     @Test
     void testHandleInternalProcessingException() throws Exception {
-        InternalProcessingException exception = new InternalProcessingException("message", new IOException());
+        InternalProcessingException exception = new InternalProcessingException(MESSAGE, new IOException());
         when(projectController.getAll()).thenThrow(exception);
 
-        mockMvc.perform(get("/api/project")).andExpect(status().isInternalServerError());
+        mockMvc.perform(get(API_PATH)).andExpect(status().isInternalServerError());
+    }
+
+    @Test
+    void testHandleConstraintViolationException() throws Exception {
+        ConstraintViolationException exception = new ConstraintViolationException(MESSAGE, null);
+        when(projectController.getAll()).thenThrow(exception);
+
+        mockMvc.perform(get(API_PATH)).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void testHandleArgoClientException() throws Exception {
+        ApiException cause = new ApiException(500, null, "An internal error has been occurred!");
+        ArgoClientException exception = new ArgoClientException(cause);
+        when(projectController.getAll()).thenThrow(exception);
+
+        mockMvc.perform(get(API_PATH))
+                .andExpect(status().isInternalServerError())
+                .andExpect(content().string("An internal error has been occurred!"));
     }
 }

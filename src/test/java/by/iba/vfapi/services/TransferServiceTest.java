@@ -26,6 +26,8 @@ import by.iba.vfapi.dto.importing.EntityDto;
 import by.iba.vfapi.dto.importing.ImportResponseDto;
 import by.iba.vfapi.dto.projects.ParamDto;
 import by.iba.vfapi.dto.projects.ParamsDto;
+import by.iba.vfapi.dto.projects.ConnectDto;
+import by.iba.vfapi.dto.projects.ConnectionsDto;
 import by.iba.vfapi.exceptions.BadRequestException;
 import by.iba.vfapi.model.argo.Arguments;
 import by.iba.vfapi.model.argo.DagTask;
@@ -349,7 +351,8 @@ class TransferServiceTest {
         doNothing().when(pipelineService).checkPipelineName("projectId", "pipelineId3", "pipelineName3");
 
         doNothing().when(argoKubernetesService).createOrReplaceConfigMap(eq("projectId"), any(ConfigMap.class));
-        when(pipelineService.createWorkflowTemplate(eq("projectId"), anyString(), anyString(), any())).thenReturn(new WorkflowTemplate());
+        when(pipelineService.createWorkflowTemplate(eq("projectId"), anyString(), anyString(), any(), any()))
+                .thenReturn(new WorkflowTemplate());
         doNothing()
             .when(argoKubernetesService)
             .createOrReplaceWorkflowTemplate(eq("projectId"), any(WorkflowTemplate.class));
@@ -359,20 +362,37 @@ class TransferServiceTest {
                           ParamDto.builder().key("someKey1").value("someValue2").secret(false).build());
         ParamsDto paramsDto = ParamsDto.builder().editable(true).params(paramDtos).build();
         when(projectService.getParams(anyString())).thenReturn(paramsDto);
+
+        List<ConnectDto> connections;
+        try {
+            connections = Arrays.asList(ConnectDto.builder().key("someKey")
+                            .value(new ObjectMapper().readTree("{\"name\": \"someValue\"}")).build(),
+                    ConnectDto.builder().key("someKey1")
+                            .value(new ObjectMapper().readTree("{\"name\": \"someValue1\"}")).build());
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+        ConnectionsDto connectionsDto = ConnectionsDto.builder().editable(true).connections(connections).build();
+        when(projectService.getConnections(anyString())).thenReturn(connectionsDto);
+
         ImportResponseDto importing = transferService.importing("projectId",
-                                                                Set.of(configMap1, configMap2, configMap3),
-                                                                Set.of(workflowTemplate1,
-                                                                       workflowTemplate2,
-                                                                       workflowTemplate3));
+                Set.of(configMap1, configMap2, configMap3),
+                Set.of(workflowTemplate1,
+                        workflowTemplate2,
+                        workflowTemplate3));
 
         Map<String, List<EntityDto>> expectedParams = new HashMap<>();
+        Map<String, List<EntityDto>> expectedConnections = new HashMap<>();
         expectedParams.put("testJob",
-                           Arrays.asList(EntityDto.builder().id("jobId1").kind("Job").nodeId("jRjFu5yR").build()));
+                Arrays.asList(EntityDto.builder().id("jobId1").kind("Job").nodeId("jRjFu5yR").build()));
+        expectedConnections.put("testJob",
+                Arrays.asList(EntityDto.builder().id("jobId1").kind("Job").nodeId("jRjFu5yR").build()));
         ImportResponseDto expected = ImportResponseDto
             .builder()
             .notImportedPipelines(List.of("pipelineId2"))
             .notImportedJobs(List.of("jobId2"))
             .missingProjectParams(expectedParams)
+            .missingProjectConnections(expectedConnections)
             .build();
 
         assertEquals(expected, importing);

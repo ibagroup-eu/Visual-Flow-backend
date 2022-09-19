@@ -22,14 +22,18 @@ package by.iba.vfapi.dto.jobs;
 import by.iba.vfapi.config.OpenApiConfig;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.exceptions.InternalProcessingException;
+import by.iba.vfapi.model.JobParams;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.io.IOException;
-import java.util.HashMap;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
+import java.util.Arrays;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -56,7 +60,7 @@ public class JobResponseDto {
     @Schema(ref = OpenApiConfig.SCHEMA_DATETIME_FIRST)
     private final String lastModified;
     @Schema(ref = OpenApiConfig.SCHEMA_JOB_PARAMS)
-    private final Map<String, String> params;
+    private final JobParams params;
     @Schema(ref = OpenApiConfig.SCHEMA_JOB_STATUS)
     private final String status;
     @Schema(description = "Whether current user can run the job and whether the job has some stages in it")
@@ -85,9 +89,42 @@ public class JobResponseDto {
                 .name(metadata.getLabels().get(Constants.NAME))
                 .definition(MAPPER.readTree(Base64.decodeBase64(annotations.get(Constants.DEFINITION))))
                 .lastModified(annotations.get(Constants.LAST_MODIFIED))
-                .params(data);
+                .params(fromMap(data));
         } catch (IOException e) {
             throw new InternalProcessingException("Unable to parse definition JSON", e);
         }
+    }
+
+    /**
+     * Convert Map<String, String> to JobParams object.
+     *
+     * @param params map params
+     * @return JobParams
+     */
+    public static JobParams fromMap(Map<String, String> params) {
+        return new JobParams()
+                .driverCores(params.get(Constants.DRIVER_CORES))
+                .driverMemory(params.get(Constants.DRIVER_MEMORY))
+                .driverRequestCores(params.get(Constants.DRIVER_REQUEST_CORES))
+                .executorCores(params.get(Constants.EXECUTOR_CORES))
+                .executorInstances(params.get(Constants.EXECUTOR_INSTANCES))
+                .executorMemory(params.get(Constants.EXECUTOR_MEMORY))
+                .executorRequestCores(params.get(Constants.EXECUTOR_REQUEST_CORES))
+                .shufflePartitions(params.get(Constants.SHUFFLE_PARTITIONS))
+                .tags(checkIfTagsExist(params)
+        );
+    }
+
+    /**
+     * Getting tags if they exist in config map.
+     *
+     * @param data config map data
+     * @return List of tags or empty
+     */
+    public static List<String> checkIfTagsExist(Map<String, String> data) {
+        if (data.get(Constants.TAGS) != null && !data.get(Constants.TAGS).isEmpty()) {
+            return Arrays.asList(data.get(Constants.TAGS).split(","));
+        }
+        return Collections.emptyList();
     }
 }

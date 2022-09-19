@@ -154,9 +154,25 @@
     </suppress>
     <suppress>
         <notes><![CDATA[
+   file name: spring-boot-starter-mail-2.5.7.jar
+   ]]></notes>
+        <packageUrl>pkg:maven/org.springframework.boot/spring-boot-starter-mail@2.5.7</packageUrl>
+        <cve>CVE-2022-22965</cve>
+        <cve>CVE-2016-1000027</cve>
+    </suppress>
+    <suppress>
+        <notes><![CDATA[
    file name: spring-context-5.3.13.jar
    ]]></notes>
         <packageUrl>pkg:maven/org.springframework/spring-context@5.3.13</packageUrl>
+        <cve>CVE-2022-22965</cve>
+        <cve>CVE-2016-1000027</cve>
+    </suppress>
+    <suppress>
+        <notes><![CDATA[
+   file name: spring-context-support-5.3.13.jar
+   ]]></notes>
+        <packageUrl>pkg:maven/org.springframework/spring-context-support@5.3.13</packageUrl>
         <cve>CVE-2022-22965</cve>
         <cve>CVE-2016-1000027</cve>
     </suppress>
@@ -228,6 +244,61 @@
    file name: spring-webmvc-5.3.13.jar
    ]]></notes>
         <packageUrl>pkg:maven/org.springframework/spring-webmvc@5.3.13</packageUrl>
+        <cve>CVE-2022-22965</cve>
+        <cve>CVE-2016-1000027</cve>
+    </suppress>
+    <suppress>
+        <notes><![CDATA[
+   file name: spring-boot-starter-data-redis-2.7.2.jar
+   ]]></notes>
+        <packageUrl>pkg:maven/org.springframework.boot/spring-boot-starter-data-redis@2.7.2</packageUrl>
+        <cve>CVE-2022-22965</cve>
+        <cve>CVE-2016-1000027</cve>
+    </suppress>
+    <suppress>
+        <notes><![CDATA[
+   file name: spring-data-redis-2.5.7.jar
+   ]]></notes>
+        <packageUrl>pkg:maven/org.springframework.data/spring-data-redis@2.5.7</packageUrl>
+        <cve>CVE-2022-22965</cve>
+        <cve>CVE-2016-1000027</cve>
+    </suppress>
+    <suppress>
+        <notes><![CDATA[
+   file name: spring-data-commons-2.5.7.jar
+   ]]></notes>
+        <packageUrl>pkg:maven/org.springframework.data/spring-data-commons@2.5.7</packageUrl>
+        <cve>CVE-2022-22965</cve>
+        <cve>CVE-2016-1000027</cve>
+    </suppress>
+    <suppress>
+        <notes><![CDATA[
+   file name: spring-data-keyvalue-2.5.7.jar
+   ]]></notes>
+        <packageUrl>pkg:maven/org.springframework.data/spring-data-keyvalue@2.5.7</packageUrl>
+        <cve>CVE-2022-22965</cve>
+        <cve>CVE-2016-1000027</cve>
+    </suppress>
+    <suppress>
+        <notes><![CDATA[
+   file name: spring-tx-5.3.13.jar
+   ]]></notes>
+        <packageUrl>pkg:maven/org.springframework/spring-tx@5.3.13</packageUrl>
+        <cve>CVE-2022-22965</cve>
+        <cve>CVE-2016-1000027</cve>
+    </suppress>
+    <suppress>
+        <notes><![CDATA[
+   file name: jedis-3.9.0.jar
+   ]]></notes>
+        <packageUrl>pkg:maven/redis.clients/jedis@3.9.0</packageUrl>
+        <cve>CVE-2021-32626</cve>
+    </suppress>
+    <suppress>
+        <notes><![CDATA[
+   file name: spring-oxm-5.3.13.jar
+   ]]></notes>
+        <packageUrl>pkg:maven/org.springframework/spring-oxm@5.3.13</packageUrl>
         <cve>CVE-2022-22965</cve>
         <cve>CVE-2016-1000027</cve>
     </suppress>

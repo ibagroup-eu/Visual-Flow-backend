@@ -25,6 +25,8 @@ import by.iba.vfapi.dto.ResourceUsageDto;
 import by.iba.vfapi.dto.projects.AccessTableDto;
 import by.iba.vfapi.dto.projects.ParamDto;
 import by.iba.vfapi.dto.projects.ParamsDto;
+import by.iba.vfapi.dto.projects.ConnectDto;
+import by.iba.vfapi.dto.projects.ConnectionsDto;
 import by.iba.vfapi.dto.projects.ProjectOverviewDto;
 import by.iba.vfapi.dto.projects.ProjectOverviewListDto;
 import by.iba.vfapi.dto.projects.ProjectRequestDto;
@@ -36,18 +38,27 @@ import io.fabric8.kubernetes.api.model.Namespace;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.ResourceQuota;
 import io.fabric8.kubernetes.api.model.Secret;
+import io.fabric8.kubernetes.api.model.PersistentVolumeClaimBuilder;
+import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
+import io.fabric8.kubernetes.api.model.PodBuilder;
+import io.fabric8.kubernetes.api.model.Pod;
+import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.api.model.ServiceAccountBuilder;
 import io.fabric8.kubernetes.api.model.rbac.RoleBinding;
 import io.fabric8.kubernetes.api.model.rbac.RoleBindingBuilder;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.Objects;
 import java.util.stream.Collectors;
 import javax.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+
+import static by.iba.vfapi.dto.Constants.SECRETS;
 
 /**
  * ProjectService class.
@@ -60,6 +71,8 @@ public class ProjectService {
     private final String imagePullSecret;
     private final String serviceAccount;
     private final String roleBinding;
+    private final String pvcMemory;
+    private final String pvcMountPath;
     private final CustomNamespaceAnnotationsConfig customNamespaceAnnotations;
 
     private final KubernetesService kubernetesService;
@@ -72,6 +85,8 @@ public class ProjectService {
         @Value("${job.spark.serviceAccount}") final String serviceAccount,
         @Value("${job.spark.roleBinding}") final String roleBinding,
         @Value("${namespace.app}") final String namespaceApp,
+        @Value("${pvc.memory}") final String pvcMemory,
+        @Value("${pvc.mountPath}") final String pvcMountPath,
         final CustomNamespaceAnnotationsConfig customAnnotations,
         AuthenticationService authenticationService) {
         this.kubernetesService = kubernetesService;
@@ -80,6 +95,8 @@ public class ProjectService {
         this.roleBinding = roleBinding;
         this.namespacePrefix = namespacePrefix;
         this.namespaceApp = namespaceApp;
+        this.pvcMemory = pvcMemory;
+        this.pvcMountPath = pvcMountPath;
         this.customNamespaceAnnotations = customAnnotations;
         this.authenticationService = authenticationService;
     }
@@ -101,6 +118,7 @@ public class ProjectService {
         kubernetesService.createNamespace(project);
         kubernetesService.createOrReplaceResourceQuota(id, limits);
         kubernetesService.createOrReplaceSecret(id, ParamsDto.builder().build().toSecret().build());
+        kubernetesService.createOrReplaceSecret(id, ConnectionsDto.builder().build().toSecret().build());
         kubernetesService.createServiceAccount(id,
                                                new ServiceAccountBuilder(kubernetesService.getServiceAccount(
                                                    namespaceApp,
@@ -129,6 +147,8 @@ public class ProjectService {
                                                 .withNamespace(id)
                                                 .endMetadata()
                                                 .build());
+        kubernetesService.createPVC(id, initializePVC());
+        kubernetesService.createPod(id, initializePod(id, getBufferPVCPodParams()));
         LOGGER.info("Project {} successfully created", id);
         return id;
     }
@@ -238,12 +258,181 @@ public class ProjectService {
     public ParamsDto getParams(final String id) {
         Secret secret = kubernetesService.getSecret(id, ParamsDto.SECRET_NAME);
         boolean editable = kubernetesService.isAccessible(secret.getMetadata().getNamespace(),
-                                                          "secrets",
-                                                          "",
-                                                          Constants.UPDATE_ACTION);
+                SECRETS,
+                "",
+                Constants.UPDATE_ACTION);
         return ParamsDto.fromSecret(secret).editable(editable).build();
     }
 
+    /**
+     * Gets project connections.
+     *
+     * @param id project id.
+     * @return list of project connections.
+     */
+    public ConnectionsDto getConnections(final String id) {
+        Secret secret = kubernetesService.getSecret(id, ConnectionsDto.SECRET_NAME);
+        boolean editable = kubernetesService.isAccessible(secret.getMetadata().getNamespace(),
+                SECRETS,
+                "",
+                Constants.UPDATE_ACTION);
+        return ConnectionsDto.fromSecret(secret).editable(editable).build();
+    }
+
+    /**
+     * Creates or updates project connections.
+     *
+     * @param id           project id.
+     * @param connectionDtoList list of connections.
+     */
+    public void updateConnections(final String id, @Valid final List<ConnectDto> connectionDtoList) {
+        kubernetesService.createOrReplaceSecret(id,
+                ConnectionsDto
+                        .builder()
+                        .connections(connectionDtoList)
+                        .build()
+                        .toSecret()
+                        .build());
+    }
+
+    /**
+     * Gets a connection by name.
+     *
+     * @param id   project id.
+     * @param name name of connection.
+     * @return project connection.
+     */
+    public ConnectDto getConnection(final String id, final String name) {
+        Secret secret = kubernetesService.getSecret(id, ConnectionsDto.SECRET_NAME);
+        boolean editable = kubernetesService.isAccessible(secret.getMetadata().getNamespace(),
+                SECRETS,
+                "",
+                Constants.UPDATE_ACTION);
+
+        return ConnectionsDto
+                .fromSecret(secret)
+                .editable(editable)
+                .build()
+                .getConnections()
+                .stream()
+                .filter((ConnectDto cdto) -> cdto.getKey().equals(name)).findFirst().orElse(null);
+    }
+
+
+    /**
+     * Creates a new connection.
+     *
+     * @param id         project id.
+     * @param connectDto list of connections.
+     */
+    public ConnectDto createConnection(final String id, final String name, @Valid final ConnectDto connectDto) {
+
+        Secret secret = kubernetesService.getSecret(id, ConnectionsDto.SECRET_NAME);
+        boolean editable = kubernetesService.isAccessible(secret.getMetadata().getNamespace(),
+                SECRETS,
+                "",
+                Constants.UPDATE_ACTION);
+
+        List<ConnectDto> connectionsList = new ArrayList<>(ConnectionsDto
+                .fromSecret(secret)
+                .editable(editable)
+                .build()
+                .getConnections());
+
+        if (connectionsList.stream().anyMatch(cdto -> cdto.getKey().equals(name))){
+            throw new BadRequestException("Connection with that name already exists.");
+        } else {
+            connectionsList.add(connectDto);
+
+            kubernetesService.createOrReplaceSecret(id,
+                    ConnectionsDto
+                            .builder()
+                            .connections(connectionsList)
+                            .build()
+                            .toSecret()
+                            .build());
+            return (connectDto);
+        }
+    }
+
+    /**
+     * Updates an existing connection.
+     *
+     * @param id         project id.
+     * @param name       connection's name.
+     * @param connectDto list of connections.
+     */
+    public ConnectDto updateConnection(final String id, final String name, @Valid final ConnectDto connectDto) {
+        Secret secret = kubernetesService.getSecret(id, ConnectionsDto.SECRET_NAME);
+        boolean editable = kubernetesService.isAccessible(secret.getMetadata().getNamespace(),
+                SECRETS,
+                "",
+                Constants.UPDATE_ACTION);
+
+        List<ConnectDto> connectionsList = new ArrayList<>(ConnectionsDto
+                .fromSecret(secret)
+                .editable(editable)
+                .build()
+                .getConnections());
+
+        if (connectionsList.stream().anyMatch(cdto -> cdto.getKey().equals(name))){
+            List<ConnectDto> newConnectionsList = connectionsList
+                    .stream()
+                    .filter(cdto -> !cdto.getKey().equals(name))
+                    .collect(Collectors.toList());
+
+            newConnectionsList.add(connectDto);
+
+            kubernetesService.createOrReplaceSecret(id,
+                    ConnectionsDto
+                            .builder()
+                            .connections(newConnectionsList)
+                            .build()
+                            .toSecret()
+                            .build());
+            return (connectDto);
+        } else {
+            throw new BadRequestException("There is no connection with that name to update.");
+        }
+    }
+
+    /**
+     * Delete a connection.
+     *
+     * @param id   project id.
+     * @param name connection's name.
+     */
+    public void deleteConnection(final String id, final String name) {
+
+        Secret secret = kubernetesService.getSecret(id, ConnectionsDto.SECRET_NAME);
+        boolean editable = kubernetesService.isAccessible(secret.getMetadata().getNamespace(),
+                SECRETS,
+                "",
+                Constants.UPDATE_ACTION);
+
+        List<ConnectDto> connectionsList = ConnectionsDto
+                .fromSecret(secret)
+                .editable(editable)
+                .build()
+                .getConnections();
+
+        if (connectionsList.stream().anyMatch(cdto -> cdto.getKey().equals(name))){
+            List<ConnectDto> newConnectionsList = connectionsList
+                    .stream()
+                    .filter(cdto -> !cdto.getKey().equals(name))
+                    .collect(Collectors.toList());
+
+            kubernetesService.createOrReplaceSecret(id,
+                    ConnectionsDto
+                            .builder()
+                            .connections(newConnectionsList)
+                            .build()
+                            .toSecret()
+                            .build());
+        } else {
+            throw new BadRequestException("There is no connection with that name to delete.");
+        }
+    }
 
     /**
      * Creates access table for project.
@@ -294,5 +483,77 @@ public class ProjectService {
                                                             "rbac.authorization.k8s.io",
                                                             Constants.UPDATE_ACTION);
         return AccessTableDto.fromRoleBindings(roleBindings).editable(isEditable).build();
+    }
+
+    /**
+     * Initialize Pod for mounting to PVC.
+     *
+     * @param id project id.
+     * @return pod.
+     */
+    private Pod initializePod(String id, Map<String, String> params) {
+        return new PodBuilder()
+                .withNewMetadata()
+                .withName(K8sUtils.PVC_POD_NAME)
+                .withNamespace(id)
+                .endMetadata()
+                .withNewSpec()
+                .addNewContainer()
+                .withName(K8sUtils.PVC_POD_NAME)
+                .withResources(K8sUtils.getResourceRequirements(params))
+                .withCommand(
+                        "/bin/sh",
+                        "-c",
+                        "while true; " +
+                        "do echo Running buffer container for uploading/downloading files; " +
+                        "sleep 100;done"
+                )
+                .withImage(K8sUtils.PVC_POD_IMAGE)
+                .withImagePullPolicy("IfNotPresent")
+                .addNewVolumeMount()
+                .withName(K8sUtils.PVC_VOLUME_NAME)
+                .withMountPath(pvcMountPath)
+                .endVolumeMount()
+                .endContainer()
+                .addNewVolume()
+                .withName(K8sUtils.PVC_VOLUME_NAME)
+                .withNewPersistentVolumeClaim()
+                .withClaimName(K8sUtils.PVC_NAME)
+                .endPersistentVolumeClaim()
+                .endVolume()
+                .addNewImagePullSecret(imagePullSecret)
+                .withRestartPolicy("Never")
+                .endSpec()
+                .build();
+    }
+
+    /**
+     * Initialize PVC for storing files.
+     *
+     * @return persistentVolumeClaim.
+     */
+    private PersistentVolumeClaim initializePVC() {
+        return new PersistentVolumeClaimBuilder()
+                .withNewMetadata().withName(K8sUtils.PVC_NAME).endMetadata()
+                .withNewSpec()
+                .withAccessModes("ReadWriteMany")
+                .withNewResources()
+                .addToRequests("storage", new Quantity(pvcMemory))
+                .endResources()
+                .endSpec()
+                .build();
+    }
+
+    /**
+     * Get request/limits params for Pod to upload/download files.
+     *
+     * @return resource parameters.
+     */
+    private Map<String, String> getBufferPVCPodParams() {
+        Map<String, String> params = new HashMap<>();
+        params.put(Constants.DRIVER_CORES, "300m");
+        params.put(Constants.DRIVER_MEMORY, "300Mi");
+        params.put(Constants.DRIVER_REQUEST_CORES, "100m");
+        return params;
     }
 }

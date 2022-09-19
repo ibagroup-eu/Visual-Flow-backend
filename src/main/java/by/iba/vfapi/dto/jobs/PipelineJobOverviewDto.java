@@ -63,7 +63,7 @@ public class PipelineJobOverviewDto {
         return PipelineJobOverviewDto
             .builder()
             .id(pod.getMetadata().getName())
-            .pipelineId(pod.getMetadata().getLabels().get(Constants.WORKFLOW_POD_LABEL))
+            .pipelineId(pod.getMetadata().getLabels().get(Constants.PIPELINE_ID_LABEL))
             .startedAt(DateTimeUtils.getFormattedDateTime(pod.getStatus().getStartTime()))
             .finishedAt(DateTimeUtils.getFormattedDateTime(K8sUtils.extractTerminatedStateField(
                 pod.getStatus(),

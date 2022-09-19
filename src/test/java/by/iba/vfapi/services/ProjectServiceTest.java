@@ -25,14 +25,19 @@ import by.iba.vfapi.dto.ResourceUsageDto;
 import by.iba.vfapi.dto.projects.AccessTableDto;
 import by.iba.vfapi.dto.projects.ParamDto;
 import by.iba.vfapi.dto.projects.ParamsDto;
+import by.iba.vfapi.dto.projects.ConnectDto;
+import by.iba.vfapi.dto.projects.ConnectionsDto;
 import by.iba.vfapi.dto.projects.ProjectOverviewDto;
 import by.iba.vfapi.dto.projects.ProjectOverviewListDto;
 import by.iba.vfapi.dto.projects.ProjectRequestDto;
 import by.iba.vfapi.dto.projects.ProjectResponseDto;
 import by.iba.vfapi.dto.projects.ResourceQuotaRequestDto;
 import by.iba.vfapi.dto.projects.ResourceQuotaResponseDto;
+import by.iba.vfapi.exceptions.BadRequestException;
 import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.services.auth.AuthenticationService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.Namespace;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
 import io.fabric8.kubernetes.api.model.NamespaceStatusBuilder;
@@ -58,6 +63,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -84,6 +90,8 @@ class ProjectServiceTest {
                                             "spark",
                                             "spark-edit",
                                             "vf",
+                                            "memory",
+                                            "mountPath",
                                             new CustomNamespaceAnnotationsConfig(),
                                             authenticationService);
     }
@@ -106,9 +114,14 @@ class ProjectServiceTest {
             projectDto.toNamespace("id", Map.of()).editMetadata().withName("vf-project-name").endMetadata().build();
         ResourceQuota rq = quotaDto.toResourceQuota().build();
         Secret s = paramsDto.toSecret().build();
+
+        ConnectionsDto connectionsDto = ConnectionsDto.builder().build();
+        Secret c = connectionsDto.toSecret().build();
+
         doNothing().when(kubernetesService).createNamespace(ns);
         doNothing().when(kubernetesService).createOrReplaceResourceQuota(PROJECT_ID, rq);
         doNothing().when(kubernetesService).createOrReplaceSecret(PROJECT_ID, s);
+        doNothing().when(kubernetesService).createOrReplaceSecret(PROJECT_ID, c);
         when(kubernetesService.getServiceAccount("vf", "spark")).thenReturn(new ServiceAccountBuilder()
                                                                                  .editOrNewMetadata()
                                                                                  .withName("spark")
@@ -336,6 +349,149 @@ class ProjectServiceTest {
                          .build(), result, "Params must be equal to expected");
         verify(kubernetesService).getSecret(PROJECT_ID, ParamsDto.SECRET_NAME);
         verify(kubernetesService).isAccessible(PROJECT_ID, "secrets", "", Constants.UPDATE_ACTION);
+    }
+
+    @Test
+    void testGetConnections() throws JsonProcessingException {
+        Secret secret = new SecretBuilder()
+                .addToData("key", "eyJuYW1lIjogInZhbHVlIn0=")
+                .withNewMetadata()
+                .withNamespace(PROJECT_ID)
+                .addToAnnotations("key", "false")
+                .endMetadata()
+                .build();
+        when(kubernetesService.getSecret(PROJECT_ID, ConnectionsDto.SECRET_NAME)).thenReturn(secret);
+        when(kubernetesService.isAccessible(PROJECT_ID, "secrets", "", Constants.UPDATE_ACTION))
+                .thenReturn(true);
+
+        ConnectionsDto result = projectService.getConnections(PROJECT_ID);
+
+        assertEquals(ConnectionsDto
+                .builder()
+                .connections(List.of(ConnectDto
+                        .builder()
+                        .key("key")
+                        .value(new ObjectMapper().readTree("{\"name\": \"value\"}"))
+                        .build()))
+                .editable(true)
+                .build(), result, "Connections must be equal to expected");
+
+        verify(kubernetesService).getSecret(PROJECT_ID, ConnectionsDto.SECRET_NAME);
+        verify(kubernetesService).isAccessible(PROJECT_ID, "secrets", "", Constants.UPDATE_ACTION);
+    }
+
+    @Test
+    void testUpdateConnections() throws JsonProcessingException {
+        List<ConnectDto> connections;
+
+        connections = List.of(ConnectDto.builder().key("key1")
+                        .value(new ObjectMapper().readTree("{\"name\": \"val1\"}")).build(),
+                ConnectDto.builder().key("key2")
+                        .value(new ObjectMapper().readTree("{\"name\": \"val2\"}")).build());
+
+        ConnectionsDto connectDto = ConnectionsDto.builder().connections(connections).build();
+        Secret secret = connectDto.toSecret().build();
+        doNothing().when(kubernetesService).createOrReplaceSecret(PROJECT_ID, secret);
+
+        projectService.updateConnections(PROJECT_ID, connections);
+
+        verify(kubernetesService).createOrReplaceSecret(PROJECT_ID, secret);
+    }
+
+    @Test
+    void testGetConnection() throws JsonProcessingException {
+        Secret secret = new SecretBuilder()
+                .addToData("key", "eyJuYW1lIjogInZhbHVlIn0=")
+                .withNewMetadata()
+                .withNamespace(PROJECT_ID)
+                .addToAnnotations("key", "false")
+                .endMetadata()
+                .build();
+        when(kubernetesService.getSecret(PROJECT_ID, ConnectionsDto.SECRET_NAME)).thenReturn(secret);
+        when(kubernetesService.isAccessible(PROJECT_ID, "secrets", "", Constants.UPDATE_ACTION))
+                .thenReturn(true);
+
+        ConnectDto result = projectService.getConnection(PROJECT_ID, "key");
+
+        assertEquals(ConnectDto
+                .builder()
+                .key("key")
+                .value(new ObjectMapper().readTree("{\"name\": \"value\"}"))
+                .build(), result, "Connections must be equal to expected");
+        verify(kubernetesService).getSecret(PROJECT_ID, ConnectionsDto.SECRET_NAME);
+        verify(kubernetesService).isAccessible(PROJECT_ID, "secrets", "", Constants.UPDATE_ACTION);
+    }
+
+    @Test
+    void testCreateConnection() throws JsonProcessingException {
+        Secret secret = new SecretBuilder()
+                .addToData("key1", "eyJuYW1lMSI6ICJ2YWx1ZTEifQ=")
+                .withNewMetadata()
+                .withNamespace(PROJECT_ID)
+                .addToAnnotations("key1", "false")
+                .endMetadata()
+                .build();
+        when(kubernetesService.getSecret(PROJECT_ID, ConnectionsDto.SECRET_NAME)).thenReturn(secret);
+        when(kubernetesService.isAccessible(PROJECT_ID, "secrets", "", Constants.UPDATE_ACTION))
+                .thenReturn(true);
+
+        ConnectDto connectDto = ConnectDto
+                .builder()
+                .key("key3")
+                .value(new ObjectMapper().readTree("{\"name3\": \"value3\"}"))
+                .build();
+
+        ConnectDto result = projectService.createConnection(PROJECT_ID, "key3", connectDto);
+
+        assertEquals(connectDto, result, "Connections must be equal to expected");
+        assertThrows(BadRequestException.class, () -> projectService
+                .createConnection(PROJECT_ID, "key1", connectDto), "Expected exception must be thrown");
+    }
+
+    @Test
+    void testUpdateConnection() throws JsonProcessingException {
+
+        Secret secret = new SecretBuilder()
+                .addToData("key1", "eyJuYW1lMSI6ICJ2YWx1ZTEifQ=")
+                .withNewMetadata()
+                .withNamespace(PROJECT_ID)
+                .addToAnnotations("key1", "false")
+                .endMetadata()
+                .build();
+        when(kubernetesService.getSecret(PROJECT_ID, ConnectionsDto.SECRET_NAME)).thenReturn(secret);
+        when(kubernetesService.isAccessible(PROJECT_ID, "secrets", "", Constants.UPDATE_ACTION))
+                .thenReturn(true);
+
+        ConnectDto connectDto = ConnectDto
+                .builder()
+                .key("key1")
+                .value(new ObjectMapper().readTree("{\"name1\": \"value1\"}"))
+                .build();
+
+        ConnectDto result = projectService.updateConnection(PROJECT_ID, "key1", connectDto);
+        assertEquals(connectDto, result, "Connections must be equal to expected");
+        assertThrows(BadRequestException.class, () -> projectService
+                .updateConnection(PROJECT_ID, "key2", connectDto), "Expected exception must be thrown");
+    }
+
+    @Test
+    void testDeleteConnection() {
+        Secret secret = new SecretBuilder()
+                .addToData("key1", "eyJuYW1lIjogInZhbHVlIn0=")
+                .withNewMetadata()
+                .withNamespace(PROJECT_ID)
+                .addToAnnotations("key1", "false")
+                .endMetadata()
+                .build();
+        when(kubernetesService.getSecret(PROJECT_ID, ConnectionsDto.SECRET_NAME)).thenReturn(secret);
+        when(kubernetesService.isAccessible(PROJECT_ID, "secrets", "", Constants.UPDATE_ACTION)).thenReturn(true);
+
+        projectService.deleteConnection(PROJECT_ID, "key1");
+
+        verify(kubernetesService).isAccessible(PROJECT_ID, "secrets", "", Constants.UPDATE_ACTION);
+
+        assertThrows(BadRequestException.class, () -> projectService
+                .deleteConnection(PROJECT_ID, "key2"), "Expected exception must be thrown");
     }
 
     @Test

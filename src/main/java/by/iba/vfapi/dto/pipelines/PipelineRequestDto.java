@@ -21,6 +21,7 @@ package by.iba.vfapi.dto.pipelines;
 
 import by.iba.vfapi.config.OpenApiConfig;
 import by.iba.vfapi.dto.Constants;
+import by.iba.vfapi.model.argo.PipelineParams;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.media.Schema;
 import javax.validation.constraints.NotNull;
@@ -47,4 +48,7 @@ public class PipelineRequestDto {
     @NotNull
     @Schema(ref = OpenApiConfig.SCHEMA_PIPELINE_DEFINITION)
     private JsonNode definition;
+
+    @Schema(ref = OpenApiConfig.SCHEMA_PIPELINE_PARAMETERS)
+    private PipelineParams params;
 }

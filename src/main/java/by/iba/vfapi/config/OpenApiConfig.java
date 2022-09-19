@@ -44,15 +44,7 @@ import org.springdoc.core.GroupedOpenApi;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import static by.iba.vfapi.services.K8sUtils.DRAFT_STATUS;
-import static by.iba.vfapi.services.K8sUtils.ERROR_STATUS;
-import static by.iba.vfapi.services.K8sUtils.FAILED_STATUS;
-import static by.iba.vfapi.services.K8sUtils.PENDING_STATUS;
-import static by.iba.vfapi.services.K8sUtils.RUNNING_STATUS;
-import static by.iba.vfapi.services.K8sUtils.STOPPED_STATUS;
-import static by.iba.vfapi.services.K8sUtils.SUCCEEDED_STATUS;
-import static by.iba.vfapi.services.K8sUtils.SUSPENDED_STATUS;
-import static by.iba.vfapi.services.K8sUtils.TERMINATED_STATUS;
+import static by.iba.vfapi.services.K8sUtils.*;
 
 @Configuration
 public class OpenApiConfig {
@@ -71,6 +63,7 @@ public class OpenApiConfig {
     public static final String SCHEMA_PROJECT_REQUIRE_CPU = "PROJECT_REQUIRE_CPU";
     public static final String SCHEMA_PROJECT_REQUIRE_MEMORY = "PROJECT_REQUIRE_MEMORY";
     public static final String SCHEMA_PROJECT_ACCESS_GRANTS = "PROJECT_ACCESS_GRANTS";
+    public static final String SCHEMA_USER = "USER";
     public static final String SCHEMA_USERS = "USERS";
     public static final String SCHEMA_ROLES = "ROLES";
     public static final String SCHEMA_DATETIME_FIRST = "DATETIME_FIRST";
@@ -81,11 +74,23 @@ public class OpenApiConfig {
     public static final String SCHEMA_JOB_PARAMS = "JOB_PARAMS";
     public static final String SCHEMA_JOB_DEFINITION = "JOB_DEFINITION";
     public static final String SCHEMA_PIPELINE_DEFINITION = "PIPELINE_DEFINITION";
+    public static final String SCHEMA_CONNECTIONS_DEFINITION = "CONNECTIONS_DEFINITION";
     public static final String SCHEMA_LOG_LEVELS = "LOG_LEVELS";
     public static final String SCHEMA_PIPELINE_STATUS = "PIPELINE_STATUS";
     public static final String SCHEMA_PIPELINE_STAGE_STATUSES = "PIPELINE_STAGE_STATUSES";
+    public static final String SCHEMA_FLAG = "job";
     private static final String SECURITY_SCHEMA_NAME = "bearerAuth";
     private static final String OPERATION = "operation";
+    private static final String JDBC_URL = "jdbcUrl";
+    private static final String PASSWORD = "password";
+    private static final String STORAGE = "storage";
+    private static final long RANDOM_BOTTOM_BORDER = 100_000_000;
+    private static final long RANDOM_UP_BORDER = 999_999_999;
+    private static final int LIMIT_CPU_EXAMPLE = 2;
+    private static final int LIMIT_MEMORY_EXAMPLE = 8;
+    private static final int REQUIRE_MEMORY_EXAMPLE = 4;
+
+    public static final String SCHEMA_PIPELINE_PARAMETERS = "PIPELINE_PARAMETERS";
 
     private static final UUID FIRST_UUID = UUID.randomUUID();
     private static final UUID SECOND_UUID = UUID.randomUUID();
@@ -93,7 +98,7 @@ public class OpenApiConfig {
     private static StringSchema getArgoModifiedIdAsSchema(String initialId) {
         StringSchema argoSchema = new StringSchema();
         argoSchema
-            .example(initialId + "-" + RandomUtils.nextLong(100000000, 999999999))
+            .example(initialId + "-" + RandomUtils.nextLong(RANDOM_BOTTOM_BORDER, RANDOM_UP_BORDER))
             .description("Pipeline child's id modified by Argo");
         return argoSchema;
     }
@@ -114,17 +119,17 @@ public class OpenApiConfig {
                                            new StringSchema()
                                                .description("Name of the stage")
                                                .example("read_from_db"),
-                                           "jdbcUrl",
+                                           JDBC_URL,
                                            new StringSchema().example("jdbc:db2://example.com:3308/test"),
                                            OPERATION,
                                            new StringSchema().description("Type of operation").example("READ"),
                                            "user",
                                            new StringSchema().example("userName123"),
-                                           "password",
+                                           PASSWORD,
                                            new StringSchema().example("test123tset"),
                                            "schema",
                                            new StringSchema().example("test_schema"),
-                                           "storage",
+                                           STORAGE,
                                            new StringSchema().example("DB2"),
                                            "table",
                                            new StringSchema().example("user_info")), "2"))
@@ -141,17 +146,17 @@ public class OpenApiConfig {
                                            new StringSchema()
                                                .description("Name of the stage")
                                                .example("write_to_another_db"),
-                                           "jdbcUrl",
+                                           JDBC_URL,
                                            new StringSchema().example("jdbc:db2://example123.com:3308/another"),
                                            OPERATION,
                                            new StringSchema().description("Type of operation").example("WRITE"),
                                            "user",
                                            new StringSchema().example("user"),
-                                           "password",
+                                           PASSWORD,
                                            new StringSchema().example("pw111wp"),
                                            "schema",
                                            new StringSchema().example("different_schema"),
-                                           "storage",
+                                           STORAGE,
                                            new StringSchema().example("DB2"),
                                            "table",
                                            new StringSchema().example("2deptUsers")), "5"))
@@ -193,6 +198,27 @@ public class OpenApiConfig {
         return graph;
     }
 
+    private static Map<String, Schema> getGraphSchemaForConnections() {
+        return Map.of(STORAGE,
+                new StringSchema()
+                        .example("db2")
+                        .description("Type of connection"),
+                "connectionName",
+                new StringSchema()
+                        .example("TestConnection1"),
+                JDBC_URL,
+                new StringSchema()
+                        .example("jdbc:mysql://mysql.db.server:3306")
+                        .description("JDBC URL"),
+                "user",
+                new StringSchema()
+                        .example("userDB")
+                        .description("Name of the user"),
+                PASSWORD,
+                new StringSchema()
+                        .example("12345678")
+                        .description("Password"));
+    }
 
     private static ObjectSchema buildGraphItem(
         Map<String, Schema<?>> values) {
@@ -221,6 +247,8 @@ public class OpenApiConfig {
             .addProperties("target", new StringSchema().example(target));
     }
 
+    // Note that this method has the following sonar error: java:S138.
+    // This error has been added to the ignore list due to the current inability to solve this problem.
     @Bean
     public OpenAPI customOpenApi() {
         final ZonedDateTime firstTime = ZonedDateTime.now(ZoneId.of("UTC"));
@@ -257,7 +285,7 @@ public class OpenApiConfig {
                             .addSchemas(SCHEMA_PROJECT_LIMIT_CPU,
                                         new NumberSchema()
                                             .type(SCHEMA_TYPE_FLOAT)
-                                            .example(2)
+                                            .example(LIMIT_CPU_EXAMPLE)
                                             .description(
                                                 "Hard cap for CPU resources for the k8s Container,in number of " +
                                                     "cores"))
@@ -271,13 +299,13 @@ public class OpenApiConfig {
                             .addSchemas(SCHEMA_PROJECT_LIMIT_MEMORY,
                                         new NumberSchema()
                                             .type(SCHEMA_TYPE_FLOAT)
-                                            .example(8)
+                                            .example(LIMIT_MEMORY_EXAMPLE)
                                             .description(
                                                 "Hard cap for RAM resources for the k8s Container,in Gigabytes"))
                             .addSchemas(SCHEMA_PROJECT_REQUIRE_MEMORY,
                                         new NumberSchema()
                                             .type(SCHEMA_TYPE_FLOAT)
-                                            .example(4)
+                                            .example(REQUIRE_MEMORY_EXAMPLE)
                                             .description(
                                                 "Soft cap for RAM resources for the k8s Container,in Gigabytes"))
                             .addSchemas(SCHEMA_PROJECT_ACCESS_GRANTS,
@@ -321,7 +349,7 @@ public class OpenApiConfig {
                             .addSchemas(SCHEMA_INSTANCE_UUID_TWO,
                                         getArgoModifiedIdAsSchema(SECOND_UUID.toString()))
                             .addSchemas(SCHEMA_JOB_PARAMS,
-                                        new MapSchema()
+                                        new ObjectSchema()
                                             .addProperties("DRIVER_CORES", new StringSchema().example("1"))
                                             .addProperties("DRIVER_MEMORY", new StringSchema().example("1"))
                                             .addProperties("DRIVER_REQUEST_CORES",
@@ -332,13 +360,15 @@ public class OpenApiConfig {
                                             .addProperties("EXECUTOR_REQUEST_CORES",
                                                            new StringSchema().example("0.1"))
                                             .addProperties("SHUFFLE_PARTITIONS", new StringSchema().example("10"))
+                                            .addProperties("TAGS",
+                                                           new ArraySchema().items(new StringSchema().example("VF-Demo")))
                                             .description("Job params that will be passed through in a ConfigMap"))
-                            .addSchemas(SCHEMA_JOB_DEFINITION, new ObjectSchema().addProperties("graph",
-                                                                                                new ArraySchema()
-                                                                                                    .items(
-                                                                                                        getGraphSchemaForJob())
-                                                                                                    .description(
-                                                                                                        "This represents a job that consists of 3 stages:READ, FILTER and WRITE. It also has all fronted-related data intentionally omitted for simplicity")))
+                            .addSchemas(SCHEMA_JOB_DEFINITION,
+                                    new ObjectSchema().addProperties("graph", new ArraySchema()
+                                            .items(getGraphSchemaForJob())
+                                            .description("This represents a job that consists of 3 stages:READ, " +
+                                                    "FILTER and WRITE. It also has all fronted-related data " +
+                                                    "intentionally omitted for simplicity")))
                             .addSchemas(SCHEMA_LOG_LEVELS,
                                         new StringSchema()
                                             .addEnumItem("TRACE")
@@ -348,13 +378,29 @@ public class OpenApiConfig {
                                             .addEnumItem("ERROR")
                                             .addEnumItem("FATAL")
                                             .description("Available log statuses"))
-                            .addSchemas(SCHEMA_PIPELINE_DEFINITION, new ObjectSchema().addProperties("graph",
-                                                                                                     new ArraySchema()
-                                                                                                         .items(
-                                                                                                             getGraphSchemaForPipeline())
-                                                                                                         .description(
-                                                                                                             "This represents a pipeline that consists of 2 stages: a Job stage and a Notification stage(will be executed only upon job failure). It also has all fronted-related data intentionally omitted for simplicity")))
-                            .addSchemas(SCHEMA_PIPELINE_STATUS,
+                            .addSchemas(SCHEMA_PIPELINE_DEFINITION,
+                                    new ObjectSchema().addProperties("graph", new ArraySchema()
+                                            .items(getGraphSchemaForPipeline())
+                                            .description("This represents a pipeline that consists of 2 stages: a " +
+                                                    "Job stage and a Notification stage(will be executed only " +
+                                                    "upon job failure). It also has all fronted-related data " +
+                                                    "intentionally omitted for simplicity")))
+                    .addSchemas(SCHEMA_CONNECTIONS_DEFINITION,
+                            new ObjectSchema().properties(getGraphSchemaForConnections()))
+                    .addSchemas(SCHEMA_PIPELINE_PARAMETERS, new ObjectSchema()
+                            .addProperties("NOTIFY_SUCCESS",
+                                    new BooleanSchema().example(true).description("Identifier of success notify"))
+                            .addProperties("NOTIFY_FAILURE",
+                                    new BooleanSchema().example(false).description("Identifier of failure notify"))
+                            .addProperties("RECIPIENTS",
+                                    new ArraySchema()
+                                            .items(new StringSchema().example("JaneDoe@email.com"))
+                                            .description("List of notification recipients"))
+                            .addProperties("TAGS",
+                                    new ArraySchema()
+                                            .items(new StringSchema().example("VF-Demo"))
+                                            .description("List of tags for grouping pipelines")))
+                    .addSchemas(SCHEMA_PIPELINE_STATUS,
                                         new StringSchema()
                                             .addEnumItem(PENDING_STATUS)
                                             .addEnumItem(RUNNING_STATUS)
@@ -372,7 +418,14 @@ public class OpenApiConfig {
                             .addSchemas(SCHEMA_PIPELINE_STAGE_STATUSES,
                                         new MapSchema()
                                             .addProperties("2", new StringSchema().example("Failed"))
-                                            .addProperties("3", new StringSchema().example("Succeeded"))))
+                                            .addProperties("3", new StringSchema().example("Succeeded")))
+                    .addSchemas(SCHEMA_FLAG,
+                            new StringSchema()
+                                    .addEnumItem("job")
+                                    .addEnumItem("pipeline")
+                                    .description(
+                                            "Type of history"))
+                    .addSchemas(SCHEMA_USER, new StringSchema().example("jane-doe")))
 
             .info(new Info().title("Visual Flow").description("Visual Flow backend API"));
     }

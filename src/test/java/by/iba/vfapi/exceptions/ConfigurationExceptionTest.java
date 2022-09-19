@@ -21,15 +21,24 @@ package by.iba.vfapi.exceptions;
 
 import org.junit.jupiter.api.Test;
 
+import static by.iba.vfapi.exceptions.ExceptionsConstants.MESSAGE;
+import static by.iba.vfapi.exceptions.ExceptionsConstants.MESSAGE_CONDITION;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class ConfigurationExceptionTest {
+
     @Test
     void testConfigurationException() {
-        Exception ex = new Exception();
-        ConfigurationException configurationException = new ConfigurationException("message", ex);
+        ConfigurationException configurationException = new ConfigurationException(MESSAGE);
+        assertEquals(MESSAGE, configurationException.getMessage(), MESSAGE_CONDITION);
+    }
 
-        assertEquals("message", configurationException.getMessage(), "Message must be equals to expected");
+    @Test
+    void testConfigurationExceptionWithParams() {
+        Exception ex = new Exception();
+        ConfigurationException configurationException = new ConfigurationException(MESSAGE, ex);
+
+        assertEquals(MESSAGE, configurationException.getMessage(), MESSAGE_CONDITION);
         assertEquals(ex, configurationException.getCause(), "Cause must be equals to expected");
     }
 }

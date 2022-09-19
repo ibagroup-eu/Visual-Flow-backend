@@ -23,6 +23,8 @@ import by.iba.vfapi.dto.ResourceUsageDto;
 import by.iba.vfapi.dto.projects.AccessTableDto;
 import by.iba.vfapi.dto.projects.ParamDto;
 import by.iba.vfapi.dto.projects.ParamsDto;
+import by.iba.vfapi.dto.projects.ConnectDto;
+import by.iba.vfapi.dto.projects.ConnectionsDto;
 import by.iba.vfapi.dto.projects.ProjectOverviewDto;
 import by.iba.vfapi.dto.projects.ProjectOverviewListDto;
 import by.iba.vfapi.dto.projects.ProjectRequestDto;
@@ -46,6 +48,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -133,6 +136,58 @@ class ProjectControllerTest {
         List<ParamDto> params = List.of(ParamDto.builder().build());
         controller.updateParams("test", params);
         verify(projectService).updateParams("test", params);
+    }
+
+    @Test
+    void testCreateOrUpdateConnections() {
+        List<ConnectDto> connections = List.of(ConnectDto.builder().build());
+        controller.updateConnections("test", connections);
+        verify(projectService).updateConnections("test", connections);
+    }
+
+    @Test
+    void testGetConnections() {
+        String name = "name";
+        List<ConnectDto> connections = List.of(ConnectDto.builder().build());
+        ConnectionsDto connectionsDto = ConnectionsDto.builder().connections(connections).build();
+        when(projectService.getConnections(name)).thenReturn(connectionsDto);
+        ConnectionsDto result = controller.getConnections(name);
+        assertEquals(connectionsDto, result, "Connections must be equals to connectionsDto");
+        verify(projectService).getConnections(name);
+    }
+
+    @Test
+    void testGetConnection() {
+        ConnectDto connection = ConnectDto.builder().key("test").build();
+        ResponseEntity<ConnectDto> responseErr = controller.getConnection("test", "name1");
+        assertEquals(HttpStatus.NOT_FOUND, responseErr.getStatusCode(), "Status must be 404");
+
+        when(projectService.getConnection("test", "name1")).thenReturn(connection);
+
+        ResponseEntity<ConnectDto> response = controller.getConnection("test", "name1");
+        assertEquals(HttpStatus.OK, response.getStatusCode(), "Status must be 200");
+    }
+
+    @Test
+    void testCreateConnection() {
+        ConnectDto connection = ConnectDto.builder().key("test").build();
+        controller.createConnection("test", "name", connection);
+        verify(projectService).createConnection("test", "name", connection);
+    }
+
+    @Test
+    void testUpdateConnection() {
+        ConnectDto connection = ConnectDto.builder().key("test").build();
+        controller.updateConnection("test", "name", connection);
+        verify(projectService).updateConnection("test", "name", connection);
+    }
+
+    @Test
+    void testDeleteConnection() {
+        doNothing().when(projectService).deleteConnection("projectName", "name");
+        ResponseEntity<ConnectDto> response = controller.deleteConnection("projectName", "name");
+        assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode(), "Status must be 204");
+        verify(projectService).deleteConnection(anyString(), anyString());
     }
 
     @Test

@@ -19,18 +19,23 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.dao.PodEventRepositoryImpl;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.dto.LogDto;
 import by.iba.vfapi.dto.projects.AccessTableDto;
+import by.iba.vfapi.exceptions.BadRequestException;
 import by.iba.vfapi.exceptions.InternalProcessingException;
+import by.iba.vfapi.model.PodEvent;
 import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.services.auth.AuthenticationService;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
+import io.fabric8.kubernetes.api.model.ContainerStateTerminated;
 import io.fabric8.kubernetes.api.model.Namespace;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
+import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.PodStatus;
 import io.fabric8.kubernetes.api.model.ResourceQuota;
@@ -49,7 +54,13 @@ import io.fabric8.kubernetes.client.DefaultKubernetesClient;
 import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
 import io.fabric8.kubernetes.client.RequestConfigBuilder;
 import io.fabric8.kubernetes.client.ResourceNotFoundException;
+import io.fabric8.kubernetes.client.Watch;
+import io.fabric8.kubernetes.client.Watcher;
+import io.fabric8.kubernetes.client.WatcherException;
 import io.fabric8.kubernetes.client.dsl.FunctionCallable;
+import java.io.InputStream;
+import java.io.IOException;
+import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -57,39 +68,50 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.stream.Collectors;
+
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.binary.Base64;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * KubernetesService class.
  */
 @Service
 @Slf4j
+@Getter
 public class KubernetesService {
     public static final String NO_POD_MESSAGE = "Pod doesn't exist";
     private static final String POD_STOP_COMMAND = "pkill -SIGTERM -u job-user";
     private static final int SERVICE_ACCOUNT_WAIT_PERIOD_MIN = 2;
     protected final String appName;
     protected final String appNameLabel;
+    protected final String pvcMountPath;
     protected final NamespacedKubernetesClient client;
     protected final NamespacedKubernetesClient userClient;
     protected final AuthenticationService authenticationService;
+    private final PodEventRepositoryImpl podEventRepository;
 
     public KubernetesService(
         final NamespacedKubernetesClient client,
         @Value("${namespace.app}") final String appName,
         @Value("${namespace.label}") final String appNameLabel,
-        final AuthenticationService authenticationService) {
+        @Value("${pvc.mountPath}") final String pvcMountPath,
+        final AuthenticationService authenticationService,
+        final PodEventRepositoryImpl podEventRepository) {
         this.appName = appName;
         this.appNameLabel = appNameLabel;
+        this.pvcMountPath = pvcMountPath;
         this.authenticationService = authenticationService;
+        this.podEventRepository = podEventRepository;
         this.client = client;
         this.userClient = new DefaultKubernetesClient(new ConfigBuilder(client.getConfiguration())
                                                           .withClientKeyFile(null)
@@ -442,7 +464,9 @@ public class KubernetesService {
                                                  AccessTableDto.USERNAME,
                                                  userInfo.getUsername(),
                                                  "name",
-                                                 userInfo.getName());
+                                                 userInfo.getName(),
+                                                 "email",
+                                                 userInfo.getEmail());
         String saName = K8sUtils.getValidK8sName(userInfo.getUsername());
 
         if (client.serviceAccounts().inNamespace(appName).withName(saName).get() == null) {
@@ -872,5 +896,128 @@ public class KubernetesService {
             .inNamespace(namespaceId)
             .withName(name)
             .require()).getStatus();
+    }
+
+    /**
+     * Upload local file into container.
+     *
+     * @param namespace      namespace
+     * @param uploadFilePath file upload path
+     * @param podName        pod name for upload
+     * @param multipartFile  multipart file
+     */
+    public void uploadFile(
+            final String namespace,
+            final String uploadFilePath,
+            final String podName,
+            final MultipartFile multipartFile
+    ) {
+        String fileName = multipartFile.getOriginalFilename();
+        File file = new File(System.getProperty("java.io.tmpdir") + "/" + fileName);
+        try {
+            multipartFile.transferTo(file);
+        } catch (IOException e) {
+            throw new BadRequestException("Couldn't transfer multipart file type to file", e);
+        }
+        client
+                .pods()
+                .inNamespace(namespace)
+                .withName(podName)
+                .file(pvcMountPath + uploadFilePath)
+                .upload(file.toPath());
+    }
+
+    /**
+     * Download file from container.
+     *
+     * @param namespace         namespace
+     * @param downloadFilePath  file download path
+     * @param podName           pod name
+     * @return                  array of bytes
+     */
+    public byte[] downloadFile(
+            final String namespace,
+            final String downloadFilePath,
+            final String podName
+    ) {
+        byte[] result;
+        try (InputStream is = client
+                .pods()
+                .inNamespace(namespace)
+                .withName(podName)
+                .file(pvcMountPath + downloadFilePath)
+                .read()
+        ) {
+            result = is.readAllBytes();
+            if(result.length == 0) {
+                throw new BadRequestException("Couldn't find the file " + downloadFilePath);
+            }
+            return result;
+        } catch (IOException e) {
+            throw new BadRequestException("Couldn't read the file input stream from container", e);
+        }
+    }
+
+    /**
+     * Creates or updates PVC.
+     *
+     * @param namespace             name of namespace.
+     * @param persistentVolumeClaim persistent volume claim.
+     */
+    public void createPVC(final String namespace, final PersistentVolumeClaim persistentVolumeClaim) {
+        authenticatedCall(authenticatedClient -> authenticatedClient
+                .persistentVolumeClaims()
+                .inNamespace(namespace)
+                .create(persistentVolumeClaim));
+    }
+
+    /**
+     * Monitors pod's events in namespace.
+     *
+     * @param namespace namespace
+     * @param podName   podName
+     * @param latch     latch
+     * @return Watch
+     */
+    public Watch watchPod(final String namespace, final String podName, final CountDownLatch latch) {
+        return client.pods().inNamespace(namespace).withName(podName).watch(new PodWatcher(podEventRepository, latch));
+    }
+}
+
+@Slf4j
+class PodWatcher implements Watcher<Pod> {
+    private final PodEventRepositoryImpl podEventRepository;
+    private final CountDownLatch latch;
+
+    public PodWatcher(final PodEventRepositoryImpl podEventRepository,
+                      final CountDownLatch latch) {
+        this.podEventRepository = podEventRepository;
+        this.latch = latch;
+    }
+
+    @Override
+    public void eventReceived(Action action, Pod pod) {
+        if (pod.getStatus().getPhase().equals(K8sUtils.FAILED_STATUS) ||
+                pod.getStatus().getPhase().equals(K8sUtils.SUCCEEDED_STATUS)) {
+            PodEvent podEvent = new PodEvent(
+                pod.getMetadata().getName(),
+                pod.getMetadata().getLabels().get(Constants.TYPE),
+                pod.getStatus().getStartTime(),
+                K8sUtils.extractTerminatedStateField(pod.getStatus(), ContainerStateTerminated::getFinishedAt),
+                pod.getMetadata().getLabels().get(Constants.STARTED_BY),
+                pod.getStatus().getPhase());
+            String key = pod.getMetadata().getNamespace() + "_" + pod.getMetadata().getName();
+            podEventRepository.add(key, podEvent);
+            LOGGER.info("Pod event successfully saved: {}", podEvent);
+            latch.countDown();
+        }
+    }
+
+    @Override
+    public void onClose(WatcherException e) {
+        if (e != null) {
+            LOGGER.error("Watch error received: {}", e.getMessage(), e);
+            latch.countDown();
+        }
     }
 }

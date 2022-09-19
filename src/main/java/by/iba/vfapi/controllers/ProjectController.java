@@ -24,6 +24,8 @@ import by.iba.vfapi.dto.ResourceUsageDto;
 import by.iba.vfapi.dto.projects.AccessTableDto;
 import by.iba.vfapi.dto.projects.ParamDto;
 import by.iba.vfapi.dto.projects.ParamsDto;
+import by.iba.vfapi.dto.projects.ConnectDto;
+import by.iba.vfapi.dto.projects.ConnectionsDto;
 import by.iba.vfapi.dto.projects.ProjectOverviewListDto;
 import by.iba.vfapi.dto.projects.ProjectRequestDto;
 import by.iba.vfapi.dto.projects.ProjectResponseDto;
@@ -45,6 +47,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -214,6 +217,139 @@ public class ProjectController {
             AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
             id);
         return projectService.getParams(id);
+    }
+
+    /**
+     * Gets connections for given project.
+     *
+     * @param id project id.
+     * @return project connections.
+     */
+    @Operation(summary = "Get all project connections", description = "Fetch all connections for given project")
+    @GetMapping("/{id}/connections")
+    public ConnectionsDto getConnections(@PathVariable final String id) {
+        LOGGER.info(
+                "{} - Receiving connections for the '{}' project",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
+        return projectService.getConnections(id);
+    }
+
+    /**
+     * Create or updates connections for given project.
+     *
+     * @param id        project id.
+     * @param connectionsDto list of connections to create/update.
+     */
+    @Operation(summary = "Create or update project connections", description = "Create/Update connections " +
+            "for given project")
+    @PostMapping("/{id}/connections")
+    public void updateConnections(
+            @PathVariable final String id, @RequestBody @Valid final List<ConnectDto> connectionsDto) {
+        LOGGER.info(
+                "{} - Updating connections for project '{}'",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
+        projectService.updateConnections(id, connectionsDto);
+        LOGGER.info(
+                "{} - Connections for project '{}' successfully updated",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
+    }
+
+    /**
+     * Gets a connection for given project by name.
+     *
+     * @param id   project id.
+     * @param name connection's name.
+     * @return project connection.
+     */
+    @Operation(summary = "Get a connection by name", description = "Fetch specific connection for given project")
+    @GetMapping("/{id}/connections/{name}")
+    public ResponseEntity<ConnectDto> getConnection(@PathVariable final String id, @PathVariable final String name) {
+        LOGGER.info(
+                "{} - Receiving {} connection for the '{}' project",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                name,
+                id);
+
+        ConnectDto connection = projectService.getConnection(id, name);
+        if (connection == null) {
+            return ResponseEntity.notFound().build();
+        } else {
+            return ResponseEntity.ok(connection);
+        }
+    }
+
+    /**
+     * Creates a new connection for given project.
+     *
+     * @param id         project id.
+     * @param name       connection's name.
+     * @param connectDto list of connections to update.
+     */
+    @Operation(summary = "Create a connection by name", description = "Create a connection " +
+            "for given project")
+    @PostMapping("/{id}/connections/{name}")
+    public void createConnection(
+            @PathVariable final String id, @PathVariable final String name,
+            @RequestBody @Valid final ConnectDto connectDto) {
+        LOGGER.info(
+                "{} - Creating {} connection for project '{}'",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()), name, id);
+        ConnectDto connection = projectService.createConnection(id, name, connectDto);
+        LOGGER.info(
+                "{} - The {} connection for the '{}' project has been successfully updated",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()), name, id);
+
+        ResponseEntity.ok(connection);
+    }
+
+    /**
+     * Updates a connection for given project.
+     *
+     * @param id         project id.
+     * @param name       connection's name.
+     * @param connectDto list of connections to update.
+     */
+    @Operation(summary = "Update a connection by name", description = "Update a connection " +
+            "for given project")
+    @PutMapping("/{id}/connections/{name}")
+    public void updateConnection(
+            @PathVariable final String id, @PathVariable final String name,
+            @RequestBody @Valid final ConnectDto connectDto) {
+        LOGGER.info(
+                "{} - Updating {} connection for project '{}'",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()), name, id);
+        ConnectDto connection = projectService.updateConnection(id, name, connectDto);
+        LOGGER.info(
+                "{} - The {} connection for the '{}' project has been successfully updated",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()), name, id);
+        ResponseEntity.ok(connection);
+    }
+
+    /**
+     * Deletes a connection for given project.
+     *
+     * @param id   project id.
+     * @param name connection's name.
+     */
+    @Operation(summary = "Delete a connection by name", description = "Delete connection " +
+            "for given project")
+    @DeleteMapping("/{id}/connections/{name}")
+    public ResponseEntity<ConnectDto> deleteConnection(
+            @PathVariable final String id, @PathVariable final String name) {
+        LOGGER.info(
+                "{} - Deleting connection for project '{}'",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
+        projectService.deleteConnection(id, name);
+        LOGGER.info(
+                "{} - The {} connection for the '{}' project has been deleted",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                name,
+                id);
+       return ResponseEntity.noContent().build();
     }
 
     /**

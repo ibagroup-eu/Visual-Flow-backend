@@ -19,13 +19,18 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.dao.PodEventRepositoryImpl;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.dto.projects.ParamDto;
 import by.iba.vfapi.dto.projects.ParamsDto;
+import by.iba.vfapi.dto.projects.ConnectDto;
+import by.iba.vfapi.dto.projects.ConnectionsDto;
 import by.iba.vfapi.dto.projects.ProjectRequestDto;
 import by.iba.vfapi.dto.projects.ResourceQuotaRequestDto;
 import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.services.auth.AuthenticationService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.ConfigMapList;
@@ -39,6 +44,8 @@ import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.PodListBuilder;
 import io.fabric8.kubernetes.api.model.PodStatus;
+import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
+import io.fabric8.kubernetes.api.model.PersistentVolumeClaimBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceQuota;
 import io.fabric8.kubernetes.api.model.ResourceQuotaBuilder;
@@ -49,6 +56,9 @@ import io.fabric8.kubernetes.api.model.ServiceAccount;
 import io.fabric8.kubernetes.api.model.ServiceAccountBuilder;
 import io.fabric8.kubernetes.api.model.ServiceAccountList;
 import io.fabric8.kubernetes.api.model.ServiceAccountListBuilder;
+import io.fabric8.kubernetes.api.model.StatusBuilder;
+import io.fabric8.kubernetes.api.model.WatchEvent;
+import io.fabric8.kubernetes.api.model.WatchEventBuilder;
 import io.fabric8.kubernetes.api.model.authorization.v1.SubjectAccessReview;
 import io.fabric8.kubernetes.api.model.authorization.v1.SubjectAccessReviewBuilder;
 import io.fabric8.kubernetes.api.model.metrics.v1beta1.ContainerMetricsBuilder;
@@ -62,12 +72,14 @@ import io.fabric8.kubernetes.api.model.rbac.RoleBinding;
 import io.fabric8.kubernetes.api.model.rbac.RoleBindingBuilder;
 import io.fabric8.kubernetes.api.model.rbac.RoleBindingList;
 import io.fabric8.kubernetes.api.model.rbac.RoleBindingListBuilder;
+import io.fabric8.kubernetes.client.WatcherException;
 import io.fabric8.kubernetes.client.server.mock.KubernetesServer;
 import java.net.HttpURLConnection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.commons.codec.binary.Base64;
@@ -86,11 +98,15 @@ class KubernetesServiceTest {
 
     private static final String APP_NAME = "vf";
     private static final String APP_NAME_LABEL = "testApp";
+    private static final String PVC_MOUNT_PATH = "/files";
+    private static final Long EVENT_WAIT_PERIOD_MS = 10L;
 
     private final KubernetesServer server = new KubernetesServer();
 
     @Mock
     private AuthenticationService authenticationServiceMock;
+    @Mock
+    private PodEventRepositoryImpl podEventRepository;
 
     private KubernetesService kubernetesService;
 
@@ -98,7 +114,7 @@ class KubernetesServiceTest {
     void setUp() {
         server.before();
         kubernetesService =
-            new KubernetesService(server.getClient(), APP_NAME, APP_NAME_LABEL, authenticationServiceMock);
+            new KubernetesService(server.getClient(), APP_NAME, APP_NAME_LABEL, PVC_MOUNT_PATH, authenticationServiceMock, podEventRepository);
     }
 
     @AfterEach
@@ -303,6 +319,53 @@ class KubernetesServiceTest {
     }
 
     @Test
+    void testGetConnections() throws JsonProcessingException {
+        mockAuthenticationService();
+
+        String namespace = "namespace";
+        Secret expected = ConnectionsDto
+                    .builder()
+                    .connections(List.of(ConnectDto.builder().key("test")
+                            .value(new ObjectMapper().readTree("{\"name\": \"dsfsd\"}")).build()))
+                    .build()
+                    .toSecret()
+                    .build();
+
+        server
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/namespace/secrets/connections")
+                .andReturn(HttpURLConnection.HTTP_OK, expected)
+                .once();
+
+        Secret result = kubernetesService.getSecret(namespace, ConnectionsDto.SECRET_NAME);
+        assertEquals(expected, result, "Connections must be equals to expected");
+    }
+
+    @Test
+    void testCreateOrUpdateConnections() throws JsonProcessingException {
+        mockAuthenticationService();
+
+        String namespace = "namespace";
+        Secret secret = ConnectionsDto
+                    .builder()
+                    .connections(List.of(ConnectDto.builder().key("test")
+                            .value(new ObjectMapper().readTree("{\"name\": \"val1\"}")).build()))
+                    .build()
+                    .toSecret()
+                    .build();
+
+        server
+                .expect()
+                .post()
+                .withPath("/api/v1/namespaces/namespace/secrets")
+                .andReturn(HttpURLConnection.HTTP_CREATED, null)
+                .once();
+
+        kubernetesService.createOrReplaceSecret(namespace, secret);
+    }
+
+    @Test
     void testGetNamespaceByName() {
         mockAuthenticationService();
 
@@ -440,13 +503,14 @@ class KubernetesServiceTest {
         userInfo.setUsername("TestUser");
         userInfo.setId("22");
         userInfo.setName("Test");
+        userInfo.setEmail("test@test.com");
 
         ServiceAccountList expected1 = new ServiceAccountListBuilder()
             .addNewItem()
             .withNewMetadata()
             .withName("testuser")
             .addToLabels("app", APP_NAME_LABEL)
-            .addToAnnotations(Map.of("username", "TestUser", "id", "22", "name", "Test"))
+            .addToAnnotations(Map.of("username", "TestUser", "id", "22", "name", "Test", "email", "test@test.com"))
             .endMetadata()
             .endItem()
             .build();
@@ -996,5 +1060,74 @@ class KubernetesServiceTest {
             }
         });
         assertNotEquals(name, actual, "Names should be different");
+    }
+
+    @Test
+    void testCreatePVC() {
+        mockAuthenticationService();
+
+        String namespace = "namespace";
+
+        PersistentVolumeClaim pvc = new PersistentVolumeClaimBuilder()
+                .withNewMetadata().withName(K8sUtils.PVC_NAME).endMetadata()
+                .withNewSpec()
+                .withAccessModes("ReadWriteMany")
+                .withNewResources()
+                .addToRequests("storage", new Quantity("1Gi"))
+                .endResources()
+                .endSpec()
+                .build();
+        server
+                .expect()
+                .post()
+                .withPath("/api/v1/namespaces/namespace/persistentvolumeclaims")
+                .andReturn(HttpURLConnection.HTTP_OK, null)
+                .once();
+
+        kubernetesService.createPVC(namespace, pvc);
+    }
+
+    @Test
+    void testWatchPod() {
+        mockAuthenticationService();
+        PodStatus podStatus = new PodStatus();
+        podStatus.setPhase(K8sUtils.SUCCEEDED_STATUS);
+        Pod pod = new PodBuilder()
+            .withNewMetadata()
+            .withNamespace("vf")
+            .withName("pod1")
+            .addToLabels(Constants.TYPE, "job")
+            .addToLabels(Constants.STARTED_BY, "test_user")
+            .withResourceVersion("1")
+            .endMetadata()
+            .withStatus(podStatus)
+            .build();
+        CountDownLatch latch = mock(CountDownLatch.class);
+
+        server
+            .expect()
+            .post()
+            .withPath("/api/v1/namespaces/vf/pods")
+            .andReturn(HttpURLConnection.HTTP_CREATED, null)
+            .once();
+        server.expect()
+            .withPath("/api/v1/namespaces/vf/pods?fieldSelector=metadata.name%3Dpod1&watch=true")
+            .andUpgradeToWebSocket()
+            .open()
+            .waitFor(EVENT_WAIT_PERIOD_MS)
+            .andEmit(outdatedEvent())
+            .done()
+            .once();
+        kubernetesService.watchPod("vf", "pod1", latch);
+        kubernetesService.createPod("vf", pod);
+    }
+
+    private static WatchEvent outdatedEvent() {
+        return new WatchEventBuilder().withStatusObject(
+            new StatusBuilder().withCode(HttpURLConnection.HTTP_GONE)
+                .withMessage(
+                    "410: The event in requested index is outdated and cleared (the requested history has been cleared [3/1]) [2]")
+                .build())
+            .build();
     }
 }

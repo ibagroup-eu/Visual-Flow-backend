@@ -19,6 +19,8 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.dao.PodEventRepositoryImpl;
+import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.model.argo.CronWorkflow;
 import by.iba.vfapi.model.argo.CronWorkflowList;
 import by.iba.vfapi.model.argo.Workflow;
@@ -52,8 +54,10 @@ public class ArgoKubernetesService extends KubernetesService {
         NamespacedKubernetesClient client,
         @Value("${namespace.app}") String appName,
         @Value("${namespace.label}") String appNameLabel,
-        AuthenticationService authenticationService) {
-        super(client, appName, appNameLabel, authenticationService);
+        @Value("${pvc.mountPath}") final String pvcMountPath,
+        AuthenticationService authenticationService,
+        PodEventRepositoryImpl podEventRepository) {
+        super(client, appName, appNameLabel, pvcMountPath, authenticationService, podEventRepository);
     }
 
     private MixedOperation<CronWorkflow, CronWorkflowList, Resource<CronWorkflow>> getCronWorkflowCrdClient(
@@ -181,6 +185,20 @@ public class ArgoKubernetesService extends KubernetesService {
             .require());
     }
 
+    /**
+     * Getting cron workflows by label.
+     *
+     * @param namespaceId namespace name
+     * @param name        workflow name
+     * @return list of cron workflows
+     */
+    public List<Workflow> getCronWorkflowsByLabel(final String namespaceId, final String name) {
+        return authenticatedCall(authenticatedClient -> getWorkflowCrdClient(authenticatedClient)
+                .inNamespace(namespaceId)
+                .withLabel(Constants.CRON_WORKFLOW_POD_LABEL, name)
+                .list()
+                .getItems());
+    }
 
     /**
      * Create or replace cron workflow.

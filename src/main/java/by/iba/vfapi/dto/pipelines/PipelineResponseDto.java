@@ -20,6 +20,7 @@
 package by.iba.vfapi.dto.pipelines;
 
 import by.iba.vfapi.config.OpenApiConfig;
+import by.iba.vfapi.model.argo.PipelineParams;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.EqualsAndHashCode;
@@ -40,6 +41,8 @@ public class PipelineResponseDto extends PipelineOverviewDto {
     private JsonNode definition;
     @Schema(description = "Whether a current user can modify the pipeline")
     private boolean editable;
+    @Schema(ref = OpenApiConfig.SCHEMA_PIPELINE_PARAMETERS)
+    private PipelineParams params;
 
     /**
      * Setter for definition.
@@ -60,6 +63,17 @@ public class PipelineResponseDto extends PipelineOverviewDto {
      */
     public PipelineResponseDto editable(boolean editable) {
         this.editable = editable;
+        return this;
+    }
+
+    /**
+     * Setter for pipline params.
+     *
+     * @param params params
+     * @return this
+     */
+    public PipelineResponseDto params(PipelineParams params) {
+        this.params = params;
         return this;
     }
 }

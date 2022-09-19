@@ -27,6 +27,7 @@ import by.iba.vfapi.services.ArgoKubernetesService;
 import by.iba.vfapi.services.JobService;
 import by.iba.vfapi.services.KubernetesService;
 import by.iba.vfapi.services.PipelineService;
+import by.iba.vfapi.services.PodService;
 import by.iba.vfapi.services.ProjectService;
 import by.iba.vfapi.services.TransferService;
 import by.iba.vfapi.services.UserService;
@@ -79,6 +80,8 @@ class VfApiApplicationTest {
     private ArgoKubernetesService argoKubernetesService;
     @Autowired
     private PipelineService pipelineService;
+    @Autowired
+    private PodService podService;
 
     {
         K8S_SERVER.init();
@@ -125,5 +128,6 @@ class VfApiApplicationTest {
         assertNotNull(transferService);
         assertNotNull(argoKubernetesService);
         assertNotNull(pipelineService);
+        assertNotNull(podService);
     }
 }

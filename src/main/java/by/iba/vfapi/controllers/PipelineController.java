@@ -79,7 +79,8 @@ public class PipelineController {
             AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
             projectId);
         String id =
-            pipelineService.create(projectId, pipelineRequestDto.getName(), pipelineRequestDto.getDefinition());
+            pipelineService.create(projectId, pipelineRequestDto.getName(),
+                    pipelineRequestDto.getDefinition(), pipelineRequestDto.getParams());
         LOGGER.info(
             "{} - Pipeline '{}' in project '{}' successfully created",
             AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
@@ -124,7 +125,8 @@ public class PipelineController {
             AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
             id,
             projectId);
-        pipelineService.update(projectId, id, pipelineRequestDto.getDefinition(), pipelineRequestDto.getName());
+        pipelineService.update(projectId, id, pipelineRequestDto.getDefinition(),
+                pipelineRequestDto.getParams(), pipelineRequestDto.getName());
         LOGGER.info(
             "{} - Pipeline '{}' in project '{}' successfully updated",
             AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),

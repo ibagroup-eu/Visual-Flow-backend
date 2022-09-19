@@ -21,6 +21,9 @@ package by.iba.vfapi.dto.pipelines;
 
 import by.iba.vfapi.config.OpenApiConfig;
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.util.Collection;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -52,8 +55,12 @@ public class PipelineOverviewDto {
     private double progress;
     @Schema(description = "Whether pipeline is represented by scheduled workflow")
     private boolean cron;
+    @Schema(description = "If true Workflow scheduling will not occur")
+    private boolean cronSuspend;
     @Schema(description = "Whether current user can run the pipeline")
     private boolean runnable;
+    @Schema(description = "Pipeline's list of tags")
+    private List<String> tags;
     @Schema(ref = OpenApiConfig.SCHEMA_PIPELINE_STAGE_STATUSES)
     private Map<String, String> jobsStatuses;
 
@@ -146,6 +153,17 @@ public class PipelineOverviewDto {
     }
 
     /**
+     * Setter for cronjob status.
+     *
+     * @param cronSuspend cronjob status
+     * @return this
+     */
+    public PipelineOverviewDto cronSuspend(boolean cronSuspend) {
+        this.cronSuspend = cronSuspend;
+        return this;
+    }
+
+    /**
      * Setter for runnable.
      *
      * @param runnable runnable
@@ -167,4 +185,16 @@ public class PipelineOverviewDto {
         return this;
     }
 
+    /**
+     * Setter for tags.
+     *
+     * @param tags tags
+     * @return this
+     */
+    public PipelineOverviewDto tags(Collection<String> tags) {
+        if (tags != null) {
+            this.tags = new ArrayList<>(tags);
+        }
+        return this;
+    }
 }

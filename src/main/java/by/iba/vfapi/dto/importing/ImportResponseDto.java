@@ -46,4 +46,5 @@ public class ImportResponseDto {
     @Schema(ref = OpenApiConfig.SCHEMA_KUBE_UUID_TWO))
     private final List<String> notImportedPipelines;
     private final Map<String, List<EntityDto>> missingProjectParams;
+    private final Map<String, List<EntityDto>> missingProjectConnections;
 }

@@ -21,9 +21,22 @@ package by.iba.vfapi.model.argo;
 
 import io.fabric8.kubernetes.client.CustomResourceList;
 
+import java.util.List;
+
 /**
  * Class represents list for custom resource WorkflowTemplate.
  */
 public class WorkflowList extends CustomResourceList<Workflow> {
     private static final long serialVersionUID = 1;
+
+    /**
+     * Setter for items.
+     *
+     * @param items list of Workflow
+     * @return this
+     */
+    public WorkflowList items(List<Workflow> items) {
+        setItems(items);
+        return this;
+    }
 }

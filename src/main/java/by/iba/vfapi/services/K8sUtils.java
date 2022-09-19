@@ -61,6 +61,11 @@ public class K8sUtils {
     public static final String FAILED_STATUS = "Failed";
     public static final String SHUTDOWN_TERMINATE = "Terminate";
     public static final String SHUTDOWN_STOP = "Stop";
+    public static final String PVC_POD_NAME = "vf-k8s-pvc";
+    public static final String PVC_POD_IMAGE = "ghcr.io/ibagomel/busybox:latest";
+    public static final String PVC_NAME = "vf-pvc";
+    public static final String PVC_VOLUME_NAME = "vf-pvc-volume";
+
     static final String WORKFLOW_TEMPLATE_TYPE = "workflowtemplates.argoproj.io";
     static final String WORKFLOW_TYPE = "workflows.argoproj.io";
     static final String CRON_WORKFLOW_TYPE = "cronworkflows.argoproj.io";
@@ -68,7 +73,6 @@ public class K8sUtils {
     static final long GROUP_ID = 1000L;
 
     static final String CONFIGMAP = "configMap";
-
 
     public static String extractTerminatedStateField(
         PodStatus podStatus, Function<ContainerStateTerminated, String> method) {
@@ -95,7 +99,6 @@ public class K8sUtils {
     /**
      * Getting resourceRequirements for Container.
      *
-     * @param configMap configMap
      * @return resourceRequirements
      */
     static ResourceRequirements getResourceRequirements(Map<String, String> params) {

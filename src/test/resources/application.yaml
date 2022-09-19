@@ -45,7 +45,9 @@ namespace:
   app: vf
   label: testApp
   prefix: ${namespace.app}-
-
+pvc:
+  memory: "1Gi"
+  mountPath: "/files"
 job:
   imagePullSecret: test
   spark:
@@ -65,3 +67,9 @@ argo:
   requests:
     cpu: 0.1
     memory: 64Mi
+redis:
+  host: test
+  port: 31380
+  username: test
+  password: test
+  database: 1

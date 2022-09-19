@@ -19,10 +19,12 @@
 
 package by.iba.vfapi.controllers;
 
+import by.iba.vfapi.dto.history.HistoryResponseDto;
 import by.iba.vfapi.dto.jobs.JobOverviewDto;
 import by.iba.vfapi.dto.jobs.JobOverviewListDto;
 import by.iba.vfapi.dto.jobs.JobRequestDto;
 import by.iba.vfapi.dto.jobs.JobResponseDto;
+import by.iba.vfapi.model.JobParams;
 import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.services.JobService;
 import by.iba.vfapi.services.auth.AuthenticationService;
@@ -95,7 +97,7 @@ class JobControllerTest {
             .builder()
             .definition(new ObjectMapper().readTree("{\"graph\":[]}"))
             .name("newName")
-            .params(Map.of("param1", "value1"))
+            .params(new JobParams().driverCores("1"))
             .build();
         when(jobService.create("projectId", jobRequestDto)).thenReturn("jobId");
         ResponseEntity<String> response = controller.create("projectId", jobRequestDto);
@@ -112,7 +114,7 @@ class JobControllerTest {
             .builder()
             .definition(new ObjectMapper().readTree("{\"graph\":[]}"))
             .name("newName")
-            .params(Map.of("param1", "value1"))
+            .params(new JobParams().driverCores("1"))
             .build();
         doNothing().when(jobService).update("jobId", "projectId", jobRequestDto);
 
@@ -148,6 +150,25 @@ class JobControllerTest {
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode(), "Status must be 204");
 
         verify(jobService).delete(anyString(), anyString());
+    }
+    @Test
+    void testJobHistory() {
+        List<HistoryResponseDto> dtoList = List.of(HistoryResponseDto
+                .builder()
+                .id("3b6d29b1-f717-4532-8fb6-68b339932253")
+                .flag("job")
+                .status("Succeeded")
+                .startedAt("2022-08-24T09:45:09Z")
+                .finishedAt("2022-08-24T09:46:19Z")
+                .startedBy("jane-doe")
+                .build());
+        when(jobService.getJobHistory("projectId", "jobId")).thenReturn(dtoList);
+
+        List<HistoryResponseDto> response = controller.getHistory("projectId", "jobId");
+
+        assertEquals(dtoList, response, "Response must be equal to dto");
+
+        verify(jobService).getJobHistory(anyString(), anyString());
     }
 
     @Test

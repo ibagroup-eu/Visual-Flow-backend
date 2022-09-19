@@ -23,6 +23,7 @@ import by.iba.vfapi.config.OpenApiConfig;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.dto.GraphDto;
 import by.iba.vfapi.exceptions.BadRequestException;
+import by.iba.vfapi.model.JobParams;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
@@ -33,7 +34,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
-import javax.validation.constraints.NotEmpty;
 import javax.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -61,9 +61,8 @@ public class JobRequestDto {
     @Schema(ref = OpenApiConfig.SCHEMA_JOB_DEFINITION)
     private JsonNode definition;
     @NotNull
-    @NotEmpty
     @Schema(ref = OpenApiConfig.SCHEMA_JOB_PARAMS)
-    private Map<String, String> params;
+    private JobParams params;
 
     /**
      * Creating job cm.
@@ -76,7 +75,7 @@ public class JobRequestDto {
         validateGraph(graphDto);
 
         Map<String, String> configMapData = new HashMap<>(graphDto.createConfigMapData());
-        configMapData.putAll(params);
+        configMapData.putAll(toMap(params));
 
         configMapData.replace(Constants.EXECUTOR_MEMORY,
                               configMapData.get(Constants.EXECUTOR_MEMORY) + Constants.GIGABYTE_QUANTITY);
@@ -123,7 +122,8 @@ public class JobRequestDto {
                 "FILTER".equals(operation) ||
                 "REMOVE_DUPLICATES".equals(operation) ||
                 "SORT".equals(operation) ||
-                "CACHE".equals(operation)) && targetsCount != 1) {
+                "CACHE".equals(operation) ||
+                "SLICE".equals(operation)) && targetsCount != 1) {
                 throw new BadRequestException(String.format("%s stage must have one input arrows", operation));
             } else if (!List.of("READ",
                                 "WRITE",
@@ -135,9 +135,30 @@ public class JobRequestDto {
                                 "FILTER",
                                 "REMOVE_DUPLICATES",
                                 "SORT",
-                                "CACHE").contains(operation)) {
+                                "CACHE",
+                                "SLICE").contains(operation)) {
                 throw new BadRequestException("Invalid stage type");
             }
         }
+    }
+
+    /**
+     * Convert JobParams object to Map<String, String>.
+     *
+     * @param jobParams job params
+     * @return Map<String, String> params
+     */
+    public Map<String, String> toMap(JobParams jobParams) {
+        return Map.of(
+                Constants.DRIVER_CORES, jobParams.getDriverCores(),
+                Constants.DRIVER_MEMORY, jobParams.getDriverMemory(),
+                Constants.DRIVER_REQUEST_CORES, jobParams.getDriverRequestCores(),
+                Constants.EXECUTOR_CORES, jobParams.getExecutorCores(),
+                Constants.EXECUTOR_INSTANCES, jobParams.getExecutorInstances(),
+                Constants.EXECUTOR_MEMORY, jobParams.getExecutorMemory(),
+                Constants.EXECUTOR_REQUEST_CORES, jobParams.getExecutorRequestCores(),
+                Constants.SHUFFLE_PARTITIONS, jobParams.getShufflePartitions(),
+                Constants.TAGS, String.join(",", jobParams.getTags()
+        ));
     }
 }

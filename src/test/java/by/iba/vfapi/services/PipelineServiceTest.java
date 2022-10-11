@@ -973,6 +973,10 @@ class PipelineServiceTest {
         WorkflowStatus status = new WorkflowStatus();
         Workflow workflow = new Workflow();
         workflow.setStatus(status);
+        workflow.setMetadata(new ObjectMetaBuilder()
+                .withCreationTimestamp(DateTime.now().toString())
+                .withName("id")
+                .build());
         status.setStartedAt(DateTime.now());
         status.setFinishedAt(DateTime.now());
         status.setProgress("0/2");
@@ -981,6 +985,7 @@ class PipelineServiceTest {
         spec.setTemplates(new ArrayList<>());
         workflow.setSpec(spec);
         when(argoKubernetesService.getWorkflow("projectId", "id")).thenReturn(workflow);
+        when(argoKubernetesService.getCronWorkflowsByLabel("projectId", "id")).thenReturn(new ArrayList<>());
         pipelineService.terminate("projectId", "id");
         verify(apiInstance).workflowServiceTerminateWorkflow("projectId", "id", new WorkflowTerminateRequest());
     }
@@ -1079,9 +1084,10 @@ class PipelineServiceTest {
                 .build());
 
         List<Workflow> workflowList = new ArrayList<>();
+        workflowList.add(workflow1);
         workflowList.add(workflow2);
         workflowList.add(workflow3);
-        Workflow actual = pipelineService.getLastStartedWorkflow(workflow1, workflowList);
+        Workflow actual = pipelineService.getLastStartedWorkflow(workflowList);
 
         assertEquals("wf3", actual.getMetadata().getName(),
                 "Name must be equals to expected");

@@ -35,17 +35,19 @@ server:
   error:                                          # enables the display of custom messages in server responses
       include-message: always
       include-binding-errors: always
+db-service:
+  host: ${DB_SERVICE_HOST}                        # Database Service host. Use HTTP protocol.
 # See documentation about configuring authentication at this link: https://github.com/ibagomel/Visual-Flow-deploy/blob/main/OAUTH.md
 oauth:
   url:
-    userInfo: USERINFO_ENDPOINT                   # URL pointing to userInfo endpoint on oauth server (for ex. Github: https://api.github.com/user, Keycloak: {ADDRESS}/auth/realms/{REALM}/protocol/openid-connect/userinfo)
+    userInfo: ${USERINFO_ENDPOINT}                # URL pointing to userInfo endpoint on oauth server (for ex. Github: https://api.github.com/user, Keycloak: {ADDRESS}/auth/realms/{REALM}/protocol/openid-connect/userinfo)
 # map between userInfo fields and json data from auth server(in our case from oauth server)
 # in case some of the data is hidden behind multiple JSON objects, use dot . to go deeper into object hierarchy, i.e. auth.email: personal.info.email
 auth:
-  id: KEY_ID                                      # user id key in returned userinfo object (for ex. Github: id, Keycloak: sub)
-  username: KEY_USERNAME                          # username key in returned userinfo object - supposed to be unique (for ex. Github: username, Keycloak: preferred_username)
-  name: KEY_NAME                                  # user's full name key in returned userinfo object (for ex. Github: name, Keycloak: name)
-  email: KEY_EMAIL                                # email address key in returned userinfo object (for ex. Github: email, Keycloak: email)
+  id:                                             # user id key in returned userinfo object (for ex. Github: id, Keycloak: sub)
+  username:                                       # username key in returned userinfo object - supposed to be unique (for ex. Github: username, Keycloak: preferred_username)
+  name:                                           # user's full name key in returned userinfo object (for ex. Github: name, Keycloak: name)
+  email:                                          # email address key in returned userinfo object (for ex. Github: email, Keycloak: email)
 superusers:
   set:
     # yaml list of user names(refers to auth.username). Example:
@@ -65,8 +67,8 @@ namespace:
     # "[openshift.io/sa.scc.supplemental-groups]": "1000/10000"
     # "[openshift.io/sa.scc.uid-range]": "1000/10000"
 pvc:
-  memory: "1Gi"                                   # amount of memory for PVC
-  mountPath: "/files"                             # PVC mount path to upload/download files
+  memory: 1Gi                                     # amount of memory for PVC
+  mountPath: /files                               # PVC mount path to upload/download files
 job:
   imagePullSecret:                                # secret in kubernetes to pull jobs images (required). Backend copies this secret to each new namespace(app project)
   spark:
@@ -86,11 +88,11 @@ argo:
     cpu: 0.1
     memory: 64Mi
 redis:
-  host: REDIS_HOST                                # The connection host of Redis database.
-  port: REDIS_PORT                                # The connection port of Redis database.
-  username: REDIS_USER                            # The connection username of Redis database.
-  password: REDIS_PASSWORD                        # The connection password of Redis database.
-  database: REDIS_DATABASE                        # The connection database name of Redis database ("0" - by default).
+  host: ${REDIS_HOST}                             # The connection host of Redis database.
+  port: ${REDIS_PORT}                             # The connection port of Redis database.
+  username: ${REDIS_USER}                         # The connection username of Redis database.
+  password: ${REDIS_PASSWORD}                     # The connection password of Redis database.
+  database: ${REDIS_DATABASE}                     # The connection database name of Redis database ("0" - by default).
 # Kubernetes Client Http Logs
 # enables logging for kubernetes client
 # feel free to comment the whole block out if you don't need it

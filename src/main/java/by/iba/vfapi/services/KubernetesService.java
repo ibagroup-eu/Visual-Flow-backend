@@ -33,6 +33,7 @@ import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.ContainerStateTerminated;
 import io.fabric8.kubernetes.api.model.Namespace;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
+import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
@@ -88,9 +89,17 @@ import org.springframework.web.multipart.MultipartFile;
 @Service
 @Slf4j
 @Getter
+// This class contains a sonar vulnerability - java:S1200: Split this class into smaller and more specialized ones to
+// reduce its dependencies on other classes from 33 to the maximum authorized 30 or less. This means, that this class
+// should not be coupled to too many other classes (Single Responsibility Principle).
+// This class also contains java:S1996: There are 2 top-level types in this file; move all but one of them to other
+// files. This means, that files should contain only one top-level class or interface each.
+// This class also contains java:S1448: This class has 53 methods, which is greater than the 35 authorized. Split it
+// into smaller classes. This means that classes should not have too many methods.
 public class KubernetesService {
     public static final String NO_POD_MESSAGE = "Pod doesn't exist";
     private static final String POD_STOP_COMMAND = "pkill -SIGTERM -u job-user";
+    private static final String PATH_DELIMITER = "/";
     private static final int SERVICE_ACCOUNT_WAIT_PERIOD_MIN = 2;
     protected final String appName;
     protected final String appNameLabel;
@@ -138,6 +147,7 @@ public class KubernetesService {
                 }
                 name = UUID.randomUUID().toString();
             } catch (ResourceNotFoundException e) {
+                LOGGER.warn("Unique entity name has not been found! {}", e.getLocalizedMessage());
                 break;
             }
         }
@@ -154,19 +164,7 @@ public class KubernetesService {
         try {
             String logs = logSupplier.get();
             String[] logItems = logs.split("\n");
-            List<LogDto> logResults = new ArrayList<>();
-
-            int logIndex = 0;
-            for (String logItem : logItems) {
-                Matcher matcher = K8sUtils.LOG_PATTERN.matcher(logItem);
-                if (matcher.matches()) {
-                    logResults.add(LogDto.fromMatcher(matcher));
-                    logIndex++;
-                } else if (logIndex != 0) {
-                    LogDto lastLog = logResults.get(logIndex - 1);
-                    logResults.set(logIndex - 1, lastLog.withMessage(lastLog.getMessage() + "\n" + logItem));
-                }
-            }
+            List<LogDto> logResults = checkLogItems(logItems);
 
             if (logResults.isEmpty()) {
                 logResults.add(LogDto.builder().message(logs).build());
@@ -177,6 +175,29 @@ public class KubernetesService {
             LOGGER.info(NO_POD_MESSAGE, e);
             return Collections.emptyList();
         }
+    }
+
+    /**
+     * Secondary method for creating logResults list from log items.
+     * @param logItems is a list of log's items.
+     * @return log's results.
+     */
+    private static List<LogDto> checkLogItems(String[] logItems) {
+        List<LogDto> logResults = new ArrayList<>();
+        int logIndex = 0;
+        for (String logItem : logItems) {
+            Matcher matcher = K8sUtils.LOG_PATTERN.matcher(logItem);
+            if (matcher.matches()) {
+                logResults.add(LogDto.fromMatcher(matcher));
+                logIndex++;
+            } else {
+                if (logIndex != 0) {
+                    LogDto lastLog = logResults.get(logIndex - 1);
+                    logResults.set(logIndex - 1, lastLog.withMessage(lastLog.getMessage() + "\n" + logItem));
+                }
+            }
+        }
+        return logResults;
     }
 
     protected FunctionCallable<NamespacedKubernetesClient> getAuthenticatedClient(NamespacedKubernetesClient kbClient) {
@@ -711,7 +732,7 @@ public class KubernetesService {
      * @param resource namespace.
      * @return true if user can view namespace.
      */
-    public boolean isViewable(final Namespace resource) {
+    public boolean isViewable(final HasMetadata resource) {
         return authenticatedCall(authenticatedClient -> authenticatedClient
             .authorization()
             .v1()
@@ -913,7 +934,7 @@ public class KubernetesService {
             final MultipartFile multipartFile
     ) {
         String fileName = multipartFile.getOriginalFilename();
-        File file = new File(System.getProperty("java.io.tmpdir") + "/" + fileName);
+        File file = new File(System.getProperty("java.io.tmpdir") + PATH_DELIMITER + fileName);
         try {
             multipartFile.transferTo(file);
         } catch (IOException e) {

@@ -45,6 +45,7 @@ import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.client.ResourceNotFoundException;
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -71,6 +72,9 @@ import org.springframework.stereotype.Service;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+// This class contains a sonar vulnerability - java:S1200: Split this class into smaller and more specialized ones to
+// reduce its dependencies on other classes from 31 to the maximum authorized 30 or less. This means, that this class
+// should not be coupled to too many other classes (Single Responsibility Principle).
 public class TransferService {
     private static final Pattern SHARPS_REGEX = Pattern.compile("^#(.+?)#$");
     private final ArgoKubernetesService argoKubernetesService;
@@ -161,7 +165,7 @@ public class TransferService {
      * @param graph                graph of job or pipeline
      * @param existingArgs       existing project args
      */
-    private void appendMissingArgs(
+    private static void appendMissingArgs(
             String id,
             Map<String, List<EntityDto>> missingProjectArgs,
             String kind,
@@ -204,7 +208,7 @@ public class TransferService {
      * @param missingProjectArgs container for missing args
      * @param existingArgs       existing project args
      */
-    private void appendJobsMissingArgs(
+    private static void appendJobsMissingArgs(
             ConfigMap configMap, Map<String, List<EntityDto>> missingProjectArgs, List<String> existingArgs) {
 
         JsonNode definition;
@@ -271,7 +275,7 @@ public class TransferService {
      * @param missingProjectArgs container for missing args
      * @param existingArgs       existing project args
      */
-    private void appendPipelinesMissingArgs(
+    private static void appendPipelinesMissingArgs(
             WorkflowTemplate workflowTemplate,
             Map<String, List<EntityDto>> missingProjectArgs,
             List<String> existingArgs) {
@@ -319,7 +323,8 @@ public class TransferService {
             try {
                 existingWfTemplate = argoKubernetesService.getWorkflowTemplate(projectId, id);
             } catch (ResourceNotFoundException e) {
-                LOGGER.info("Pipeline with id {} doesn't exist, the import procedure will create a new one", id);
+                LOGGER.info("Pipeline with id {} doesn't exist, the import procedure will create a new one: {}",
+                        id, e.getLocalizedMessage());
             }
             try {
                 pipelineService.checkPipelineName(projectId, id, name);
@@ -330,7 +335,8 @@ public class TransferService {
                             "missing definition graph", id, name));
                 }
                 ObjectMapper mapper = new ObjectMapper();
-                JsonNode parsedDefinition = mapper.readTree(new String(Base64.decodeBase64(encodedDefinition)));
+                JsonNode parsedDefinition = mapper.readTree(new String(Base64.decodeBase64(encodedDefinition),
+                        Charset.defaultCharset()));
                 PipelineParams params = workflowTemplate.getSpec().getPipelineParams();
                 if (existingWfTemplate == null) {
                     argoKubernetesService.createOrReplaceWorkflowTemplate(projectId,
@@ -496,7 +502,7 @@ public class TransferService {
      * @param entityMetadataList list of all available entities(of the same type) from current project
      * @param <T>                entity's metadata
      */
-    private <T extends HasMetadata> void copyEntity(
+    private static <T extends HasMetadata> void copyEntity(
             final String projectId, T entityMetadata, BiConsumer<String, T> saver, List<T> entityMetadataList) {
         String currentName = entityMetadata.getMetadata().getLabels().get(Constants.NAME);
         int availableIndex = getNextEntityCopyIndex(currentName, entityMetadataList);
@@ -523,7 +529,7 @@ public class TransferService {
      * @param <T>                entity type
      * @return number of copies
      */
-    private <T extends HasMetadata> int getNextEntityCopyIndex(String entityName, List<T> entityMetadataList) {
+    private static <T extends HasMetadata> int getNextEntityCopyIndex(String entityName, List<T> entityMetadataList) {
         Pattern groupIndex = Pattern.compile(String.format("^%s-Copy(\\d+)?$", Pattern.quote(entityName)));
         return entityMetadataList.stream().map((T e) -> {
             String name = e.getMetadata().getLabels().get(Constants.NAME);

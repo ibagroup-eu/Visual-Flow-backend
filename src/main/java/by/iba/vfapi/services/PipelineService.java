@@ -947,8 +947,9 @@ public class PipelineService {
     private RuntimeData getRunTimeData(String projectId, String id, List<Template> storedTemplates) {
         RuntimeData runtimeData = new RuntimeData();
         Workflow workflow = argoKubernetesService.getWorkflow(projectId, id);
-        List<Workflow> cronWorkflows = argoKubernetesService.getCronWorkflowsByLabel(projectId, id);
-        Workflow lastStartedWorkflow = getLastStartedWorkflow(workflow, cronWorkflows);
+        List<Workflow> workflows = argoKubernetesService.getCronWorkflowsByLabel(projectId, id);
+        workflows.add(workflow);
+        Workflow lastStartedWorkflow = getLastStartedWorkflow(workflows);
         WorkflowStatus status = lastStartedWorkflow.getStatus();
         String currentStatus = status.getPhase();
         if (K8sUtils.FAILED_STATUS.equals(currentStatus)) {
@@ -1241,15 +1242,20 @@ public class PipelineService {
      * @param id        workflow id
      */
     public void terminate(String projectId, String id) {
+        Workflow workflow = argoKubernetesService.getWorkflow(projectId, id);
+        List<Workflow> workflows = argoKubernetesService.getCronWorkflowsByLabel(projectId, id);
+        workflows.add(workflow);
+        Workflow lastStartedWorkflow = getLastStartedWorkflow(workflows);
+        String lId = lastStartedWorkflow.getMetadata().getName();
         performArgoAction(projectId,
-                          id,
-                          ((RuntimeData data) -> List
-                              .of(K8sUtils.RUNNING_STATUS, K8sUtils.SUSPENDED_STATUS, K8sUtils.PENDING_STATUS)
-                              .contains(data.getStatus())),
-                          "You cannot terminate pipeline that hasn't been started or suspended",
-                          (String pId, String i) -> apiInstance.workflowServiceTerminateWorkflow(pId,
-                                                                                                 i,
-                                                                                                 new WorkflowTerminateRequest()));
+                id,
+                ((RuntimeData data) -> List
+                        .of(K8sUtils.RUNNING_STATUS, K8sUtils.SUSPENDED_STATUS, K8sUtils.PENDING_STATUS)
+                        .contains(data.getStatus())),
+                "You cannot terminate pipeline that hasn't been started or suspended",
+                (String pId, String i) -> apiInstance.workflowServiceTerminateWorkflow(pId,
+                        lId,
+                        new WorkflowTerminateRequest()));
     }
 
     /**
@@ -1431,14 +1437,12 @@ public class PipelineService {
     }
 
     /**
-     * Get last started workflow from the list of workflow and its cron workflows
+     * Get last started workflow from the list of workflows
      *
-     * @param  workflow    workflow
      * @param  workflows   list of cron workflows
      * @return last started workflow
      */
-    protected Workflow getLastStartedWorkflow(Workflow workflow, List<Workflow> workflows) {
-        workflows.add(workflow);
+    protected Workflow getLastStartedWorkflow(List<Workflow> workflows) {
         return workflows.stream().max(
                 Comparator.comparing(wf -> ZonedDateTime.parse(
                         wf.getMetadata().getCreationTimestamp())

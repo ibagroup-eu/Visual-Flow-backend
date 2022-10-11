@@ -72,6 +72,9 @@ import org.springframework.stereotype.Service;
  */
 @Slf4j
 @Service
+// This class contains a sonar vulnerability - java:S1200: Split this class into smaller and more specialized ones to
+// reduce its dependencies on other classes from 32 to the maximum authorized 30 or less. This means, that this class
+// should not be coupled to too many other classes (Single Responsibility Principle).
 public class JobService {
 
     private final String jobImage;
@@ -85,6 +88,8 @@ public class JobService {
     private final PodService podService;
     private final PodEventRepositoryImpl podEventRepository;
 
+    // Note that this constructor has the following sonar error: java:S107 - Methods should not have too many
+    // parameters. This error has been added to ignore list due to the current inability to solve this problem.
     public JobService(
         @Value("${job.spark.image}") final String jobImage,
         @Value("${job.spark.master}") final String jobMaster,
@@ -160,7 +165,7 @@ public class JobService {
             }
             return createFromConfigMap(projectId, configMap, replaceIfExists);
         } catch (ResourceNotFoundException ex) {
-            LOGGER.info("It's ok, there is no job with such id");
+            LOGGER.info("It's ok, there is no job with such id: {}", ex.getLocalizedMessage());
             kubernetesService.createOrReplaceConfigMap(projectId, configMap);
             return id;
         }
@@ -215,12 +220,12 @@ public class JobService {
                 jobBuilder
                     .startedAt(DateTimeUtils.getFormattedDateTime(podStatus.getStartTime()))
                     .status(podStatus.getPhase())
-                    .finishedAt(DateTimeUtils.getFormattedDateTime(K8sUtils.extractTerminatedStateField(podStatus,
-                                                                                                        ContainerStateTerminated::getFinishedAt)));
+                    .finishedAt(DateTimeUtils.getFormattedDateTime(K8sUtils
+                            .extractTerminatedStateField(podStatus, ContainerStateTerminated::getFinishedAt)));
 
                 jobBuilder.usage(getJobUsage(projectId, jobId, null));
             } catch (ResourceNotFoundException e) {
-                LOGGER.warn("Job {} has not started yet", jobId);
+                LOGGER.warn("Job {} has not started yet: {}", jobId, e.getLocalizedMessage());
                 jobBuilder.status(K8sUtils.DRAFT_STATUS);
             }
             List<Pod> workflowPods = kubernetesService.getWorkflowPods(projectId, jobId);
@@ -250,7 +255,9 @@ public class JobService {
         consumer.accept(kubernetesService.isAccessible(projectId, "configmaps", "", Constants.UPDATE_ACTION));
     }
 
-    private void appendRunnable(Map<String, String> cmData, Consumer<Boolean> consumer, boolean accessibleToRun) {
+    private static void appendRunnable(Map<String, String> cmData,
+                                       Consumer<Boolean> consumer,
+                                       boolean accessibleToRun) {
         String jobConfigField = cmData.get(Constants.JOB_CONFIG_FIELD);
         ObjectMapper objectMapper = new ObjectMapper();
         try {
@@ -317,10 +324,10 @@ public class JobService {
             jobResponseDtoBuilder
                 .status(status.getPhase())
                 .startedAt(DateTimeUtils.getFormattedDateTime(status.getStartTime()))
-                .finishedAt(DateTimeUtils.getFormattedDateTime(K8sUtils.extractTerminatedStateField(status,
-                                                                                                    ContainerStateTerminated::getFinishedAt)));
+                .finishedAt(DateTimeUtils.getFormattedDateTime(K8sUtils
+                        .extractTerminatedStateField(status, ContainerStateTerminated::getFinishedAt)));
         } catch (ResourceNotFoundException e) {
-            LOGGER.warn("Job {} has not started yet", id);
+            LOGGER.warn("Job {} has not started yet: {}", id, e.getLocalizedMessage());
         }
 
         appendRunnable(configMap.getData(), jobResponseDtoBuilder::runnable, accessibleToRun);

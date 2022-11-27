@@ -47,6 +47,7 @@ import io.fabric8.kubernetes.client.ResourceNotFoundException;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.time.ZonedDateTime;
+import java.util.Collections;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -488,6 +489,9 @@ public class TransferService {
                     .getMetadata()
                     .getName())));
             wfTemplate.getSpec().setImagePullSecrets(listOfSecrets);
+            wfTemplate.getSpec().setPipelineParams(
+                    workflowTemplate.getSpec().getPipelineParams().dependentPipelineIds(Collections.emptySet())
+            );
             wfTemplate.getMetadata().setName(newPipelineId);
             argoKubernetesService.createOrReplaceWorkflowTemplate(projectId, wfTemplate);
         }, argoKubernetesService.getAllWorkflowTemplates(projectId));

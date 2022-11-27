@@ -20,12 +20,12 @@
 package by.iba.vfapi.dto.history;
 
 import by.iba.vfapi.config.OpenApiConfig;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
+import lombok.RequiredArgsConstructor;
 
 /**
  * Single job response DTO class.
@@ -33,13 +33,13 @@ import lombok.ToString;
 @EqualsAndHashCode
 @Builder
 @Getter
+@RequiredArgsConstructor
 @ToString
 public class HistoryResponseDto {
-    private static final ObjectMapper MAPPER = new ObjectMapper();
     @Schema(description = "Job's name", example = "test_history_job")
     private final String id;
-    @Schema(ref = OpenApiConfig.SCHEMA_FLAG)
-    private final String flag;
+    @Schema(ref = OpenApiConfig.SCHEMA_TYPE)
+    private final String type;
     @Schema(ref = OpenApiConfig.SCHEMA_DATETIME_FIRST)
     private final String startedAt;
     @Schema(ref = OpenApiConfig.SCHEMA_DATETIME_SECOND)
@@ -48,4 +48,6 @@ public class HistoryResponseDto {
     private final String startedBy;
     @Schema(ref = OpenApiConfig.SCHEMA_JOB_STATUS)
     private final String status;
+    @Schema(ref = OpenApiConfig.SCHEMA_JOB_HISTORY_LOG_ID)
+    private final String logId;
 }

@@ -17,28 +17,42 @@
  * limitations under the License.
  */
 
-package by.iba.vfapi.model;
+package by.iba.vfapi.model.history;
 
-import lombok.AllArgsConstructor;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.ToString;
 
-import java.io.Serializable;
-
 /**
- * Data model of the pod events' information.
+ * Data model of the history information.
  */
-@AllArgsConstructor
 @Getter
 @Setter
-@ToString
-public class PodEvent implements Serializable {
+@NoArgsConstructor
+@ToString(callSuper=true)
+public class PipelineNodeHistory extends AbstractHistory {
     private static final long serialVersionUID = 1;
-    private String id;
-    private String flag;
-    private String startedAt;
-    private String finishedAt;
-    private String startedBy;
-    private String status;
+    private String name;
+    private String operation;
+
+    /**
+     * Constructor for class PipelineNodeHistory.
+     *
+     * @param id job id
+     * @param startedAt time of the start
+     * @param finishedAt time of the finish
+     * @param status status of the pipeline node's run
+     */
+    public PipelineNodeHistory(
+        String id,
+        String name,
+        String operation,
+        String startedAt,
+        String finishedAt,
+        String status) {
+        super(id, startedAt, finishedAt, status);
+        this.name = name;
+        this.operation = operation;
+    }
 }

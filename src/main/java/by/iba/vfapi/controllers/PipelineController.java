@@ -20,7 +20,7 @@
 package by.iba.vfapi.controllers;
 
 import by.iba.vfapi.config.OpenApiConfig;
-import by.iba.vfapi.dto.LogDto;
+import by.iba.vfapi.dto.history.PipelineHistoryResponseDto;
 import by.iba.vfapi.dto.pipelines.CronPipelineDto;
 import by.iba.vfapi.dto.pipelines.PipelineOverviewListDto;
 import by.iba.vfapi.dto.pipelines.PipelineRequestDto;
@@ -417,23 +417,21 @@ public class PipelineController {
     }
 
     /**
-     * Getting custom container logs.
+     * Getting pipeline history.
      *
      * @param projectId  project id
      * @param pipelineId pipeline id
-     * @param nodeId     node id
-     * @return ResponseEntity with list of logs objects
+     * @return List of pipeline history response DTO
      */
-    @Operation(summary = "Get custom container logs", description = "Get all logs for a specific custom container")
-    @GetMapping("{projectId}/pipeline/{pipelineId}/{nodeId}/logs")
-    public List<LogDto> getCustomContainerLogs(
-        @PathVariable String projectId, @PathVariable String pipelineId, @PathVariable String nodeId) {
+    @Operation(summary = "Get pipeline history", description = "Get history for a specific pipeline")
+    @GetMapping("{projectId}/pipeline/{pipelineId}/history")
+    public List<PipelineHistoryResponseDto> getPipelineHistory(
+            @PathVariable String projectId, @PathVariable String pipelineId) {
         LOGGER.info(
-            "{} - Receiving custom container in project '{}', pipeline '{}' at node '{}'",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
-            projectId,
-            pipelineId,
-            nodeId);
-        return pipelineService.getCustomContainerLogs(projectId, pipelineId, nodeId);
+                "{} - Receiving pipeline '{}' history in project '{}'",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                pipelineId,
+                projectId);
+        return pipelineService.getPipelineHistory(projectId, pipelineId);
     }
 }

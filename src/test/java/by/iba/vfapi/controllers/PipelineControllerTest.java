@@ -19,6 +19,8 @@
 
 package by.iba.vfapi.controllers;
 
+import by.iba.vfapi.dto.history.PipelineHistoryResponseDto;
+import by.iba.vfapi.dto.history.PipelineNodesHistoryResponseDto;
 import by.iba.vfapi.dto.pipelines.CronPipelineDto;
 import by.iba.vfapi.dto.pipelines.PipelineOverviewDto;
 import by.iba.vfapi.dto.pipelines.PipelineOverviewListDto;
@@ -32,6 +34,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -226,5 +229,35 @@ class PipelineControllerTest {
         pipelineController.updateCron("projectId", "id", cronPipelineDto);
 
         verify(pipelineService).updateCron(anyString(), anyString(), any(CronPipelineDto.class));
+    }
+
+    @Test
+    void testGetPipelineHistory() {
+        List<PipelineHistoryResponseDto> pipelineHistoryResponseDtos = new ArrayList<>();
+        List<PipelineNodesHistoryResponseDto> pipelineNodesHistoryResponseDtos = new ArrayList<>();
+
+        pipelineNodesHistoryResponseDtos.add(
+                new PipelineNodesHistoryResponseDto(
+                        "1",
+                        "node",
+                        "JOB",
+                        "Success",
+                        "2022-11-11 11:02:23",
+                        "2022-11-11 11:02:23",
+                        "212213"));
+
+        pipelineHistoryResponseDtos.add(new PipelineHistoryResponseDto(
+                "1",
+                "pipeline",
+                "2022-11-11 11:03:23",
+                "2022-11-11 11:03:23",
+                "test",
+                "Success",
+                pipelineNodesHistoryResponseDtos));
+
+        when(pipelineService.getPipelineHistory("projectId", "id")).thenReturn(pipelineHistoryResponseDtos);
+
+        pipelineController.getPipelineHistory("projectId", "id");
+        verify(pipelineService).getPipelineHistory(anyString(), anyString());
     }
 }

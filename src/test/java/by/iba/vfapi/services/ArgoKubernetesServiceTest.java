@@ -19,16 +19,19 @@
 
 package by.iba.vfapi.services;
 
-import by.iba.vfapi.dao.PodEventRepositoryImpl;
+import by.iba.vfapi.dao.LogRepositoryImpl;
+import by.iba.vfapi.dao.PipelineHistoryRepository;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.model.argo.CronWorkflow;
 import by.iba.vfapi.model.argo.Workflow;
 import by.iba.vfapi.model.argo.WorkflowList;
 import by.iba.vfapi.model.argo.WorkflowTemplate;
 import by.iba.vfapi.model.argo.WorkflowTemplateList;
+import by.iba.vfapi.model.argo.WorkflowStatus;
 import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.services.auth.AuthenticationService;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
+import io.fabric8.kubernetes.api.model.WatchEvent;
 import io.fabric8.kubernetes.api.model.apiextensions.v1beta1.CustomResourceDefinition;
 import io.fabric8.kubernetes.api.model.apiextensions.v1beta1.CustomResourceDefinitionBuilder;
 import io.fabric8.kubernetes.api.model.apiextensions.v1beta1.CustomResourceDefinitionNamesBuilder;
@@ -37,6 +40,8 @@ import io.fabric8.kubernetes.client.server.mock.KubernetesServer;
 import java.net.HttpURLConnection;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,6 +51,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -53,13 +60,15 @@ class ArgoKubernetesServiceTest {
     private static final String APP_NAME = "vf";
     private static final String APP_NAME_LABEL = "testApp";
     private static final String PVC_MOUNT_PATH = "/files";
+    private static final String IMAGE_PULL_SECRET = "vf-dev-image-pull";
+    private static final Long EVENT_WAIT_PERIOD_MS = 10L;
 
     private final KubernetesServer server = new KubernetesServer();
 
     @Mock
     private AuthenticationService authenticationServiceMock;
     @Mock
-    private PodEventRepositoryImpl podEventRepository;
+    private LogRepositoryImpl logRepository;
 
     private ArgoKubernetesService argoKubernetesService;
 
@@ -127,8 +136,15 @@ class ArgoKubernetesServiceTest {
             .withPath("/apis/apiextensions.k8s.io/v1beta1/customresourcedefinitions/cronworkflows.argoproj.io")
             .andReturn(HttpURLConnection.HTTP_OK, cronWfCrd)
             .once();
-        argoKubernetesService =
-            new ArgoKubernetesService(server.getClient(), APP_NAME, APP_NAME_LABEL, PVC_MOUNT_PATH, authenticationServiceMock, podEventRepository);
+        argoKubernetesService = new ArgoKubernetesService(
+            server.getClient(),
+            APP_NAME,
+            APP_NAME_LABEL,
+            PVC_MOUNT_PATH,
+            IMAGE_PULL_SECRET,
+            authenticationServiceMock,
+            logRepository
+        );
     }
 
     @AfterEach
@@ -206,6 +222,25 @@ class ArgoKubernetesServiceTest {
         WorkflowTemplate actual = argoKubernetesService.getWorkflowTemplate("vf", "id");
 
         assertEquals(template.getMetadata(), actual.getMetadata(), "Metadata must be equals to expected");
+    }
+
+    @Test
+    void testIsWorkflowTemplateExist() {
+        mockAuthenticationService();
+
+        WorkflowTemplate template = new WorkflowTemplate();
+        template.setMetadata(new ObjectMetaBuilder().withName("id").addToLabels("name", "wf").build());
+
+        server
+                .expect()
+                .get()
+                .withPath("/apis/argoproj.io/v1alpha1/namespaces/vf/workflowtemplates/id")
+                .andReturn(HttpURLConnection.HTTP_OK, template)
+                .once();
+
+        boolean workflowExistence = argoKubernetesService.isWorkflowTemplateExist("vf", "id");
+
+        assertTrue(workflowExistence, "WorkflowTemplate existence must be equals to expected");
     }
 
     @Test
@@ -397,5 +432,36 @@ class ArgoKubernetesServiceTest {
         boolean cronExistence = argoKubernetesService.isCronWorkflowReadyOrExist("vf", "id");
 
         assertTrue(cronExistence, "Cron existence must be equals to expected");
+    }
+
+    @Test
+    void testWatchWorkflow() {
+        mockAuthenticationService();
+        WorkflowStatus workflowStatus = new WorkflowStatus();
+        workflowStatus.setPhase(K8sUtils.SUCCEEDED_STATUS);
+        Workflow workflow = new Workflow();
+        workflow.setMetadata(new ObjectMetaBuilder()
+            .withNamespace("vf")
+            .withName("wf")
+            .addToLabels(Constants.TYPE, "job")
+            .addToLabels(Constants.STARTED_BY, "test_user")
+            .withResourceVersion("1")
+            .build());
+        workflow.setStatus(workflowStatus);
+        CountDownLatch latch = mock(CountDownLatch.class);
+        PipelineHistoryRepository historyRepository = mock(PipelineHistoryRepository.class);
+
+        server.expect()
+            .withPath(
+                "/apis/argoproj.io/v1alpha1/namespaces/vf/workflows?fieldSelector=metadata.name%3Dwf&watch=true")
+            .andUpgradeToWebSocket()
+            .open()
+            .waitFor(EVENT_WAIT_PERIOD_MS)
+            .andEmit(new WatchEvent(workflow, "MODIFIED"))
+            .done()
+            .once();
+
+        assertNotNull(argoKubernetesService.watchWorkflow("vf", "wf", historyRepository, latch),
+    "Should return Watch event");
     }
 }

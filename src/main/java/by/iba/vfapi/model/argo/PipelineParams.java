@@ -30,6 +30,8 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Parameter in workflows.
@@ -49,6 +51,8 @@ public class PipelineParams implements Serializable {
     private List<String> recipients;
     @JsonProperty("TAGS")
     private List<String> tags;
+    @JsonProperty("DEPENDENT_PIPELINE_IDS")
+    private Set<String> dependentPipelineIds;
 
     /**
      * Setter for name.
@@ -94,6 +98,19 @@ public class PipelineParams implements Serializable {
     public PipelineParams tags(Collection<String> tags) {
         if (tags != null) {
             this.tags = new ArrayList<>(tags);
+        }
+        return this;
+    }
+
+    /**
+     * Setter for dependentPipelineIds.
+     *
+     * @param  dependentPipelineIds dependentPipelineIds
+     * @return this
+     */
+    public PipelineParams dependentPipelineIds(Collection<String> dependentPipelineIds) {
+        if (dependentPipelineIds != null) {
+            this.dependentPipelineIds = new HashSet<>(dependentPipelineIds);
         }
         return this;
     }

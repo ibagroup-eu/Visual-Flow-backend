@@ -58,6 +58,11 @@ public class ParamsDto {
     @ArraySchema(arraySchema = @Schema(description = "List of all params for given project"))
     private List<ParamDto> params;
 
+    public ParamsDto(boolean editable, List<ParamDto> params) {
+        this.editable = editable;
+        this.params = params;
+    }
+
     public static ParamsDtoBuilder fromSecret(Secret secret) {
         Map<String, String> secretData = Objects.requireNonNullElse(secret.getData(), Collections.emptyMap());
         List<ParamDto> params = secretData

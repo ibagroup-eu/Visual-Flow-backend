@@ -108,13 +108,13 @@ class GraphDtoTest {
 
     @Test
     void testCompletePipelineGraph() {
-        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_JOB_NAME,
+        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_NAME,
                                                                                        "jobName",
                                                                                        Constants.NODE_JOB_ID,
                                                                                        "testJob1",
                                                                                        Constants.NODE_OPERATION,
                                                                                        Constants.NODE_OPERATION_JOB)),
-                                                      new GraphDto.NodeDto("2", Map.of(Constants.NODE_JOB_NAME,
+                                                      new GraphDto.NodeDto("2", Map.of(Constants.NODE_NAME,
                                                                                        "jobName2",
                                                                                        Constants.NODE_JOB_ID,
                                                                                        "testJob2",
@@ -129,18 +129,19 @@ class GraphDtoTest {
         when(argoKubernetesService.getConfigMap(anyString(), anyString())).thenReturn(new ConfigMap());
         assertDoesNotThrow(() -> GraphDto.validateGraphPipeline(pipelineGraph,
                                                                 "testProject",
+                                                                "id",
                                                                 argoKubernetesService));
     }
 
     @Test
     void testEdgelessPipelineGraph() {
-        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_JOB_NAME,
+        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_NAME,
                                                                                        "jobName",
                                                                                        Constants.NODE_JOB_ID,
                                                                                        "testJob1",
                                                                                        Constants.NODE_OPERATION,
                                                                                        Constants.NODE_OPERATION_JOB)),
-                                                      new GraphDto.NodeDto("2", Map.of(Constants.NODE_JOB_NAME,
+                                                      new GraphDto.NodeDto("2", Map.of(Constants.NODE_NAME,
                                                                                        "jobName2",
                                                                                        Constants.NODE_JOB_ID,
                                                                                        "testJob2",
@@ -150,18 +151,19 @@ class GraphDtoTest {
         when(argoKubernetesService.getConfigMap(anyString(), anyString())).thenReturn(new ConfigMap());
         assertDoesNotThrow(() -> GraphDto.validateGraphPipeline(pipelineGraph,
                                                                 "testProject",
+                                                                "id",
                                                                 argoKubernetesService));
     }
 
     @Test
     void testNoJobOperationPipelineGraph() {
         GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1",
-                                                                           Map.of(Constants.NODE_JOB_NAME,
+                                                                           Map.of(Constants.NODE_NAME,
                                                                                   "jobName",
                                                                                   Constants.NODE_JOB_ID,
                                                                                   "testJob1"))), List.of());
         assertThrows(BadRequestException.class,
-                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", argoKubernetesService));
+                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject","id", argoKubernetesService));
     }
 
     @Test
@@ -173,24 +175,24 @@ class GraphDtoTest {
                                                                                   Constants.NODE_OPERATION_JOB))),
                                               List.of());
         assertThrows(BadRequestException.class,
-                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", argoKubernetesService));
+                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", "id", argoKubernetesService));
     }
 
     @Test
     void testNoJobIdPipelineGraph() {
         GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1",
-                                                                           Map.of(Constants.NODE_JOB_NAME,
+                                                                           Map.of(Constants.NODE_NAME,
                                                                                   "jobName",
                                                                                   Constants.NODE_OPERATION,
                                                                                   Constants.NODE_OPERATION_JOB))),
                                               List.of());
         assertThrows(BadRequestException.class,
-                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", argoKubernetesService));
+                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", "id", argoKubernetesService));
     }
 
     @Test
     void testNonExistingJobIdPipelineGraph() {
-        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_JOB_NAME,
+        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_NAME,
                                                                                        "jobName",
                                                                                        Constants.NODE_JOB_ID,
                                                                                        "testJob1",
@@ -200,12 +202,12 @@ class GraphDtoTest {
         when(argoKubernetesService.getConfigMap(anyString(), anyString()))
             .thenThrow(new ResourceNotFoundException(""));
         assertThrows(BadRequestException.class,
-                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", argoKubernetesService));
+                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", "id", argoKubernetesService));
     }
 
     @Test
     void testMalformedJobIdPipelineGraph() {
-        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_JOB_NAME,
+        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_NAME,
                                                                                        "jobName",
                                                                                        Constants.NODE_JOB_ID,
                                                                                        "testJob1",
@@ -214,30 +216,30 @@ class GraphDtoTest {
                                               List.of());
         when(argoKubernetesService.getConfigMap(anyString(), anyString())).thenReturn(null);
         assertThrows(BadRequestException.class,
-                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", argoKubernetesService));
+                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", "id", argoKubernetesService));
     }
 
     @Test
     void testBadJobOperationTypePipelineGraph() {
-        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_JOB_NAME,
+        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_NAME,
                                                                                        "jobName",
                                                                                        Constants.NODE_JOB_ID,
                                                                                        "testJob1",
                                                                                        Constants.NODE_OPERATION,
                                                                                        "abc"))), List.of());
         assertThrows(BadRequestException.class,
-                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", argoKubernetesService));
+                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", "id", argoKubernetesService));
     }
 
     @Test
     void testBadEdgeOperationTypePipelineGraph() {
-        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_JOB_NAME,
+        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_NAME,
                                                                                        "jobName",
                                                                                        Constants.NODE_JOB_ID,
                                                                                        "testJob1",
                                                                                        Constants.NODE_OPERATION,
                                                                                        Constants.NODE_OPERATION_JOB)),
-                                                      new GraphDto.NodeDto("2", Map.of(Constants.NODE_JOB_NAME,
+                                                      new GraphDto.NodeDto("2", Map.of(Constants.NODE_NAME,
                                                                                        "jobName2",
                                                                                        Constants.NODE_JOB_ID,
                                                                                        "testJob2",
@@ -249,18 +251,18 @@ class GraphDtoTest {
                                                                                   "test"), "1", "2")));
         when(argoKubernetesService.getConfigMap(anyString(), anyString())).thenReturn(new ConfigMap());
         assertThrows(BadRequestException.class,
-                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", argoKubernetesService));
+                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", "id", argoKubernetesService));
     }
 
     @Test
     void testMissingSuccessPathPipelineGraph() {
-        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_JOB_NAME,
+        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_NAME,
                                                                                        "jobName",
                                                                                        Constants.NODE_JOB_ID,
                                                                                        "testJob1",
                                                                                        Constants.NODE_OPERATION,
                                                                                        Constants.NODE_OPERATION_JOB)),
-                                                      new GraphDto.NodeDto("2", Map.of(Constants.NODE_JOB_NAME,
+                                                      new GraphDto.NodeDto("2", Map.of(Constants.NODE_NAME,
                                                                                        "jobName2",
                                                                                        Constants.NODE_JOB_ID,
                                                                                        "testJob2",
@@ -272,18 +274,18 @@ class GraphDtoTest {
                                                                            "2")));
         when(argoKubernetesService.getConfigMap(anyString(), anyString())).thenReturn(new ConfigMap());
         assertThrows(BadRequestException.class,
-                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", argoKubernetesService));
+                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", "id", argoKubernetesService));
     }
 
     @Test
     void testBadSuccessPathPipelineGraph() {
-        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_JOB_NAME,
+        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_NAME,
                                                                                        "jobName",
                                                                                        Constants.NODE_JOB_ID,
                                                                                        "testJob1",
                                                                                        Constants.NODE_OPERATION,
                                                                                        Constants.NODE_OPERATION_JOB)),
-                                                      new GraphDto.NodeDto("2", Map.of(Constants.NODE_JOB_NAME,
+                                                      new GraphDto.NodeDto("2", Map.of(Constants.NODE_NAME,
                                                                                        "jobName2",
                                                                                        Constants.NODE_JOB_ID,
                                                                                        "testJob2",
@@ -298,18 +300,18 @@ class GraphDtoTest {
                                                   "2")));
         when(argoKubernetesService.getConfigMap(anyString(), anyString())).thenReturn(new ConfigMap());
         assertThrows(BadRequestException.class,
-                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", argoKubernetesService));
+                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", "id", argoKubernetesService));
     }
 
     @Test
     void testBadSourcePipelineGraph() {
-        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_JOB_NAME,
+        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_NAME,
                                                                                        "jobName",
                                                                                        Constants.NODE_JOB_ID,
                                                                                        "testJob1",
                                                                                        Constants.NODE_OPERATION,
                                                                                        Constants.NODE_OPERATION_JOB)),
-                                                      new GraphDto.NodeDto("2", Map.of(Constants.NODE_JOB_NAME,
+                                                      new GraphDto.NodeDto("2", Map.of(Constants.NODE_NAME,
                                                                                        "jobName2",
                                                                                        Constants.NODE_JOB_ID,
                                                                                        "testJob2",
@@ -323,18 +325,18 @@ class GraphDtoTest {
                                                                            "2")));
         when(argoKubernetesService.getConfigMap(anyString(), anyString())).thenReturn(new ConfigMap());
         assertThrows(BadRequestException.class,
-                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", argoKubernetesService));
+                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", "id", argoKubernetesService));
     }
 
     @Test
     void testBadTargetPipelineGraph() {
-        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_JOB_NAME,
+        GraphDto pipelineGraph = new GraphDto(List.of(new GraphDto.NodeDto("1", Map.of(Constants.NODE_NAME,
                                                                                        "jobName",
                                                                                        Constants.NODE_JOB_ID,
                                                                                        "testJob1",
                                                                                        Constants.NODE_OPERATION,
                                                                                        Constants.NODE_OPERATION_JOB)),
-                                                      new GraphDto.NodeDto("2", Map.of(Constants.NODE_JOB_NAME,
+                                                      new GraphDto.NodeDto("2", Map.of(Constants.NODE_NAME,
                                                                                        "jobName2",
                                                                                        Constants.NODE_JOB_ID,
                                                                                        "testJob2",
@@ -348,7 +350,7 @@ class GraphDtoTest {
                                                                            "20")));
         when(argoKubernetesService.getConfigMap(anyString(), anyString())).thenReturn(new ConfigMap());
         assertThrows(BadRequestException.class,
-                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", argoKubernetesService));
+                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", "id", argoKubernetesService));
     }
 
     @Test
@@ -361,7 +363,7 @@ class GraphDtoTest {
                                                                  "1",
                                                                  "2")));
         assertThrows(BadRequestException.class,
-                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", argoKubernetesService));
+                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", "id", argoKubernetesService));
     }
 
     @Test
@@ -372,10 +374,11 @@ class GraphDtoTest {
                                                                                        "test",
                                                                                        Constants.NODE_NOTIFICATION_MESSAGE,
                                                                                        "test msg",
-                                                                                       Constants.NODE_NOTIFICATION_NAME,
+                                                                                       Constants.NODE_NAME,
                                                                                        "test_notif"))), List.of());
         assertDoesNotThrow(() -> GraphDto.validateGraphPipeline(pipelineGraph,
                                                                 "testProject",
+                                                                "id",
                                                                 argoKubernetesService));
     }
 
@@ -388,7 +391,7 @@ class GraphDtoTest {
                                                                                        Constants.NODE_NOTIFICATION_MESSAGE,
                                                                                        "test msg"))), List.of());
         assertThrows(BadRequestException.class,
-                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", argoKubernetesService));
+                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", "id", argoKubernetesService));
     }
 
     @Test
@@ -397,10 +400,10 @@ class GraphDtoTest {
                                                                                        Constants.NODE_OPERATION_NOTIFICATION,
                                                                                        Constants.NODE_NOTIFICATION_MESSAGE,
                                                                                        "test msg",
-                                                                                       Constants.NODE_NOTIFICATION_NAME,
+                                                                                       Constants.NODE_NAME,
                                                                                        "test_notif"))), List.of());
         assertThrows(BadRequestException.class,
-                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", argoKubernetesService));
+                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", "id", argoKubernetesService));
     }
 
     @Test
@@ -409,9 +412,9 @@ class GraphDtoTest {
                                                                                        Constants.NODE_OPERATION_NOTIFICATION,
                                                                                        Constants.NODE_NOTIFICATION_RECIPIENTS,
                                                                                        "test",
-                                                                                       Constants.NODE_NOTIFICATION_NAME,
+                                                                                       Constants.NODE_NAME,
                                                                                        "test_notif"))), List.of());
         assertThrows(BadRequestException.class,
-                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", argoKubernetesService));
+                     () -> GraphDto.validateGraphPipeline(pipelineGraph, "testProject", "id", argoKubernetesService));
     }
 }

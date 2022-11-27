@@ -69,6 +69,7 @@ public class OpenApiConfig {
     public static final String SCHEMA_DATETIME_FIRST = "DATETIME_FIRST";
     public static final String SCHEMA_DATETIME_SECOND = "DATETIME_SECOND";
     public static final String SCHEMA_JOB_STATUS = "JOB_STATUS";
+    public static final String SCHEMA_JOB_HISTORY_LOG_ID = "SCHEMA_JOB_HISTORY_LOG_ID";
     public static final String SCHEMA_INSTANCE_UUID_ONE = "INSTANCE_UUID_ONE";
     public static final String SCHEMA_INSTANCE_UUID_TWO = "INSTANCE_UUID_TWO";
     public static final String SCHEMA_JOB_PARAMS = "JOB_PARAMS";
@@ -77,8 +78,9 @@ public class OpenApiConfig {
     public static final String SCHEMA_CONNECTIONS_DEFINITION = "CONNECTIONS_DEFINITION";
     public static final String SCHEMA_LOG_LEVELS = "LOG_LEVELS";
     public static final String SCHEMA_PIPELINE_STATUS = "PIPELINE_STATUS";
+    public static final String SCHEMA_PIPELINE_NODES_HISTORY = "PIPELINE_NODES_HISTORY";
     public static final String SCHEMA_PIPELINE_STAGE_STATUSES = "PIPELINE_STAGE_STATUSES";
-    public static final String SCHEMA_FLAG = "job";
+    public static final String SCHEMA_TYPE = "job";
     private static final String SECURITY_SCHEMA_NAME = "bearerAuth";
     private static final String OPERATION = "operation";
     private static final String JDBC_URL = "jdbcUrl";
@@ -345,6 +347,19 @@ public class OpenApiConfig {
                                             .addEnumItem(FAILED_STATUS)
                                             .addEnumItem(DRAFT_STATUS)
                                             .description("Status is determined based on Pod's phase"))
+                            .addSchemas(SCHEMA_PIPELINE_NODES_HISTORY,
+                                        new ObjectSchema()
+                                                .addProperties("id", new StringSchema().example("1sadwqq-wesfe"))
+                                                .addProperties("startedAt", new StringSchema()
+                                                        .example(DateTimeUtils
+                                                                .getFormattedDateTime(firstTime.toString())))
+                                                .addProperties("finishedAt", new StringSchema()
+                                                        .example(DateTimeUtils
+                                                                .getFormattedDateTime(secondTime.toString())))
+                                                .addProperties("status", new StringSchema()
+                                                        .example(SUCCEEDED_STATUS))
+                                                .addProperties("logId", new StringSchema().example("123123121"))
+                                                .description("Pipeline nodes history Response dto list"))
                             .addSchemas(SCHEMA_INSTANCE_UUID_ONE, getArgoModifiedIdAsSchema(FIRST_UUID.toString()))
                             .addSchemas(SCHEMA_INSTANCE_UUID_TWO,
                                         getArgoModifiedIdAsSchema(SECOND_UUID.toString()))
@@ -361,7 +376,8 @@ public class OpenApiConfig {
                                                            new StringSchema().example("0.1"))
                                             .addProperties("SHUFFLE_PARTITIONS", new StringSchema().example("10"))
                                             .addProperties("TAGS",
-                                                           new ArraySchema().items(new StringSchema().example("VF-Demo")))
+                                                           new ArraySchema()
+                                                                   .items(new StringSchema().example("VF-Demo")))
                                             .description("Job params that will be passed through in a ConfigMap"))
                             .addSchemas(SCHEMA_JOB_DEFINITION,
                                     new ObjectSchema().addProperties("graph", new ArraySchema()
@@ -419,12 +435,14 @@ public class OpenApiConfig {
                                         new MapSchema()
                                             .addProperties("2", new StringSchema().example("Failed"))
                                             .addProperties("3", new StringSchema().example("Succeeded")))
-                    .addSchemas(SCHEMA_FLAG,
+                    .addSchemas(SCHEMA_TYPE,
                             new StringSchema()
                                     .addEnumItem("job")
                                     .addEnumItem("pipeline")
                                     .description(
                                             "Type of history"))
+                    .addSchemas(SCHEMA_JOB_HISTORY_LOG_ID,
+                            new StringSchema().example("1665591306866"))
                     .addSchemas(SCHEMA_USER, new StringSchema().example("jane-doe")))
 
             .info(new Info().title("Visual Flow").description("Visual Flow backend API"));

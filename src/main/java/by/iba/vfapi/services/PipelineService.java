@@ -19,9 +19,11 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.dao.PipelineHistoryRepository;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.dto.GraphDto;
-import by.iba.vfapi.dto.LogDto;
+import by.iba.vfapi.dto.history.PipelineHistoryResponseDto;
+import by.iba.vfapi.dto.history.PipelineNodesHistoryResponseDto;
 import by.iba.vfapi.dto.pipelines.CronPipelineDto;
 import by.iba.vfapi.dto.pipelines.PipelineOverviewDto;
 import by.iba.vfapi.dto.pipelines.PipelineOverviewListDto;
@@ -47,6 +49,7 @@ import by.iba.vfapi.model.argo.Inputs;
 import by.iba.vfapi.model.argo.NodeStatus;
 import by.iba.vfapi.model.argo.Parameter;
 import by.iba.vfapi.model.argo.PipelineParams;
+import by.iba.vfapi.model.argo.Resource;
 import by.iba.vfapi.model.argo.RuntimeData;
 import by.iba.vfapi.model.argo.SecretRef;
 import by.iba.vfapi.model.argo.Template;
@@ -61,6 +64,11 @@ import by.iba.vfapi.model.argo.WorkflowStatus;
 import by.iba.vfapi.model.argo.WorkflowTemplate;
 import by.iba.vfapi.model.argo.WorkflowTemplateRef;
 import by.iba.vfapi.model.argo.WorkflowTemplateSpec;
+import by.iba.vfapi.model.history.AbstractHistory;
+import by.iba.vfapi.model.history.PipelineHistory;
+import by.iba.vfapi.model.history.PipelineNodeHistory;
+import by.iba.vfapi.services.auth.AuthenticationService;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.argoproj.workflow.ApiException;
@@ -71,6 +79,7 @@ import io.argoproj.workflow.models.WorkflowStopRequest;
 import io.argoproj.workflow.models.WorkflowSuspendRequest;
 import io.argoproj.workflow.models.WorkflowTerminateRequest;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
+import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceQuota;
@@ -98,20 +107,28 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import javax.validation.Valid;
 import javax.validation.constraints.NotNull;
+import java.util.regex.Pattern;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.text.StringEscapeUtils;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.json.JsonParseException;
 import org.springframework.stereotype.Service;
 
 import static by.iba.vfapi.dto.Constants.CONTAINER_NODE_ID;
 import static by.iba.vfapi.dto.Constants.NODE_JOB_ID;
+import static by.iba.vfapi.dto.Constants.NODE_PIPELINE_ID;
 import static by.iba.vfapi.dto.Constants.NODE_OPERATION;
 import static by.iba.vfapi.dto.Constants.NODE_OPERATION_CONTAINER;
 import static by.iba.vfapi.dto.Constants.NODE_OPERATION_JOB;
+import static by.iba.vfapi.dto.Constants.NODE_OPERATION_PIPELINE;
 import static by.iba.vfapi.dto.Constants.NODE_OPERATION_NOTIFICATION;
+import static by.iba.vfapi.dto.Constants.NODE_OPERATION_WAIT;
 import static by.iba.vfapi.dto.Constants.PIPELINE_ID_LABEL;
+import static by.iba.vfapi.dto.Constants.NODE_NAME;
+import static by.iba.vfapi.dto.Constants.PIPELINE_HISTORY;
+import static by.iba.vfapi.dto.Constants.PIPELINE_NODE_HISTORY;
 
 /**
  * PipelineService class.
@@ -129,6 +146,8 @@ public class PipelineService {
     public static final String COMMAND = "command";
     static final String SPARK_TEMPLATE_NAME = "sparkTemplate";
     static final String NOTIFICATION_TEMPLATE_NAME = "notificationTemplate";
+    static final String PIPELINE_TEMPLATE_NAME = "pipelineTemplate";
+    static final String PIPELINE_ID = "pipelineId";
     static final String CONTAINER_WITH_CMD_TEMPLATE_NAME = "containerTemplateWithCmd";
     static final String CONTAINER_WITH_CMD_AND_PROJECT_PARAMS_TEMPLATE_NAME =
         "containerTemplateWithCmdAndProjectParams";
@@ -148,6 +167,9 @@ public class PipelineService {
     private final String imagePullSecret;
     private final String notificationImage;
     private final String pvcMountPath;
+    private final WorkflowService workflowService;
+    private final AuthenticationService authenticationService;
+    private final PipelineHistoryRepository<? extends AbstractHistory> pipelineHistoryRepository;
     @Value("${job.slack.apiToken}")
     private String slackApiToken;
 
@@ -160,7 +182,10 @@ public class PipelineService {
         @Value("${pvc.mountPath}") final String pvcMountPath,
         ArgoKubernetesService argoKubernetesService,
         ProjectService projService,
-        WorkflowServiceApi apiInstance) {
+        WorkflowServiceApi apiInstance,
+        final WorkflowService workflowService,
+        final AuthenticationService authenticationService,
+        final PipelineHistoryRepository<? extends AbstractHistory> pipelineHistoryRepository) {
         this.sparkImage = sparkImage;
         this.jobMaster = jobMaster;
         this.serviceAccount = serviceAccount;
@@ -170,6 +195,9 @@ public class PipelineService {
         this.projectService = projService;
         this.apiInstance = apiInstance;
         this.pvcMountPath = pvcMountPath;
+        this.workflowService = workflowService;
+        this.authenticationService = authenticationService;
+        this.pipelineHistoryRepository = pipelineHistoryRepository;
     }
 
     /**
@@ -182,13 +210,22 @@ public class PipelineService {
      * @return new DAGTask
      */
     private static DagTask createSparkDagTask(
-        String name, String depends, @NotNull String parameterValue, String graphId, String pipelineId) {
+        String name,
+        String depends,
+        @NotNull String parameterValue,
+        String graphId,
+        String pipelineId,
+        String jobName,
+        String operation
+    ) {
         return new DagTask()
             .name(name)
             .template(SPARK_TEMPLATE_NAME)
             .depends(depends)
             .arguments(new Arguments()
                            .addParametersItem(new Parameter().name(K8sUtils.CONFIGMAP).value(parameterValue))
+                           .addParametersItem(new Parameter().name(NODE_NAME).value(jobName))
+                           .addParametersItem(new Parameter().name(NODE_OPERATION).value(operation))
                            .addParametersItem(new Parameter().name(PIPELINE_ID_LABEL).value(pipelineId))
                            .addParametersItem(new Parameter().name(GRAPH_ID).value(graphId)));
     }
@@ -203,7 +240,13 @@ public class PipelineService {
      * @return task
      */
     private static DagTask createContainerDagTask(
-        String name, String depends, ContainerStageConfig config, String nodeId, String pipelineId) {
+        String name,
+        String depends,
+        ContainerStageConfig config,
+        String nodeId,
+        String pipelineId,
+        String jobName,
+        String operation) {
         Arguments arguments = new Arguments()
             .addParametersItem(new Parameter().name(IMAGE_PULL_POLICY).value(config.getImagePullPolicy()))
             .addParametersItem(new Parameter().name(IMAGE_LINK).value(config.getImageLink()))
@@ -221,7 +264,9 @@ public class PipelineService {
                                    .value(Quantity.parse(config.getRequestMemory()).toString()))
             .addParametersItem(new Parameter().name(Constants.CONTAINER_NODE_ID).value(nodeId))
             .addParametersItem(new Parameter().name(Constants.PIPELINE_ID_LABEL).value(pipelineId))
-            .addParametersItem(new Parameter().name(GRAPH_ID).value(nodeId));
+            .addParametersItem(new Parameter().name(GRAPH_ID).value(nodeId))
+            .addParametersItem(new Parameter().name(NODE_NAME).value(jobName))
+            .addParametersItem(new Parameter().name(NODE_OPERATION).value(operation));
         boolean withCustomCommand = config.getStartCommand() != null && !config.getStartCommand().isEmpty();
         String template = composeContainerTemplateName(withCustomCommand, config.isMountProjectParams());
         if (withCustomCommand) {
@@ -241,7 +286,13 @@ public class PipelineService {
      * @return new DAGTask
      */
     private static DagTask createNotificationDagTask(
-        String name, String depends, String addressees, String message, String graphId) {
+        String name,
+        String depends,
+        String addressees,
+        String message,
+        String graphId,
+        String jobName,
+        String operation) {
         return new DagTask()
             .name(name)
             .template(NOTIFICATION_TEMPLATE_NAME)
@@ -256,7 +307,31 @@ public class PipelineService {
                            .addParametersItem(new Parameter()
                                                   .name(Constants.NODE_NOTIFICATION_MESSAGE)
                                                   .value(StringEscapeUtils.escapeXSI(message)))
-                           .addParametersItem(new Parameter().name(GRAPH_ID).value(graphId)));
+                           .addParametersItem(new Parameter().name(GRAPH_ID).value(graphId))
+                           .addParametersItem(new Parameter().name(NODE_NAME).value(jobName))
+                           .addParametersItem(new Parameter().name(NODE_OPERATION).value(operation)));
+    }
+
+    /**
+     * Creating DAGTask for pipeline.
+     *
+     * @param name       task name
+     * @param depends    String of dependencies
+     * @param pipelineId value of parameter 'pipelineId'
+     * @param graphId    value of node id from graph
+     * @return new DAGTask
+     */
+    private static DagTask createPipelineDagTask(
+            String name, String depends, String pipelineId, String graphId, String jobName, String operation) {
+        return new DagTask()
+                .name(name)
+                .template(PIPELINE_TEMPLATE_NAME)
+                .depends(depends)
+                .arguments(new Arguments()
+                        .addParametersItem(new Parameter().name(PIPELINE_ID).value(pipelineId))
+                        .addParametersItem(new Parameter().name(GRAPH_ID).value(graphId))
+                        .addParametersItem(new Parameter().name(NODE_NAME).value(jobName))
+                        .addParametersItem(new Parameter().name(NODE_OPERATION).value(operation)));
     }
 
     /**
@@ -326,42 +401,59 @@ public class PipelineService {
         List<GraphDto.NodeDto> nodes = graphDto.getNodes();
         List<GraphDto.EdgeDto> edges = graphDto.getEdges();
         replaceIds(nodes, edges);
-        nodes
-            .stream()
-            .filter((GraphDto.NodeDto n) -> n.getValue().get(NODE_JOB_ID) != null)
-            .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()))
-            .entrySet()
-            .stream()
-            .filter((Map.Entry<GraphDto.NodeDto, Long> e) -> e.getValue() > 1)
-            .findAny()
-            .ifPresent((Map.Entry<GraphDto.NodeDto, Long> e) -> {
-                throw new BadRequestException("Job can't be used more than once in pipeline");
-            });
+        validateNodes(nodes);
+        List<GraphDto.NodeDto> waitNodes = nodes
+                .stream()
+                .filter((GraphDto.NodeDto n) -> n.getValue().get(NODE_OPERATION).equals(NODE_OPERATION_WAIT))
+                .collect(Collectors.toList());
+        nodes = nodes
+                .stream()
+                .filter((GraphDto.NodeDto n) -> !n.getValue().get(NODE_OPERATION).equals(NODE_OPERATION_WAIT))
+                .collect(Collectors.toList());
 
         checkSourceArrows(edges);
 
         DagTemplate dagTemplate = new DagTemplate();
         for (GraphDto.NodeDto node : nodes) {
             String id = node.getId();
-            String depends = accumulateDepends(edges, id);
-
+            String nodeDependencies = accumulateDepends(edges, id);
+            StringBuilder waitNodeDependencies = new StringBuilder();
+            for (String nodeDependency: parseDependenciesAsList(nodeDependencies)) {
+                String waitNodeID = checkDependencyForWaitNode(waitNodes, nodeDependency);
+                if(waitNodeID != null) {
+                    waitNodeDependencies.append(formatDependencies(
+                                waitNodeDependencies,
+                                accumulateDepends(edges, waitNodeID)));
+                    nodeDependencies = waitNodeDependencies.toString();
+                }
+            }
             DagTask dagTask;
             String operation = node.getValue().get(NODE_OPERATION);
+            String stageName = node.getValue().get(NODE_NAME);
             switch (operation) {
                 case NODE_OPERATION_JOB:
-                    dagTask = createSparkDagTask(id, depends,
+                    dagTask = createSparkDagTask(id, nodeDependencies,
                                                  node.getValue().get(NODE_JOB_ID),
                                                  node.getValue().get(id),
-                                                 workflowTemplate.getMetadata().getName());
+                                                 workflowTemplate.getMetadata().getName(),
+                                                 stageName,
+                                                 operation);
+                    break;
+                case NODE_OPERATION_PIPELINE:
+                    dagTask = createPipelineDagTask(id, nodeDependencies,
+                                                 node.getValue().get(NODE_PIPELINE_ID),
+                                                 node.getValue().get(id),
+                                                 stageName,
+                                                 operation);
                     break;
                 case NODE_OPERATION_NOTIFICATION:
-                    dagTask = createNotificationDagTask(id,
-                                                        depends,
-                                                        node
-                                                            .getValue()
+                    dagTask = createNotificationDagTask(id, nodeDependencies,
+                                                        node.getValue()
                                                             .get(Constants.NODE_NOTIFICATION_RECIPIENTS),
                                                         node.getValue().get(Constants.NODE_NOTIFICATION_MESSAGE),
-                                                        node.getValue().get(id));
+                                                        node.getValue().get(id),
+                                                        stageName,
+                                                        operation);
                     break;
                 case NODE_OPERATION_CONTAINER:
                     Optional<ContainerStageConfig> nodeConfig = containerStageConfig
@@ -374,19 +466,55 @@ public class PipelineService {
                         throw new InternalProcessingException("Cannot find container config for a node " +
                                                                   node.getId());
                     }
-                    dagTask = createContainerDagTask(id,
-                                                     depends,
+                    dagTask = createContainerDagTask(id, nodeDependencies,
                                                      nodeConfig.get(),
                                                      node.getValue().get(id),
-                                                     workflowTemplate.getMetadata().getName());
+                                                     workflowTemplate.getMetadata().getName(),
+                                                     stageName,
+                                                     operation);
                     break;
                 default:
                     throw new BadRequestException("Unknown operation type");
             }
             dagTemplate.addTasksItem(dagTask);
         }
-
         return dagTemplate;
+    }
+
+    /**
+     * Validate graph nodes list.
+     *
+     * @param nodes list of graph nodes
+     */
+    private static void validateNodes(List<GraphDto.NodeDto> nodes) {
+        nodes
+            .stream()
+            .filter((GraphDto.NodeDto n) -> n.getValue().get(NODE_JOB_ID) != null)
+            .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()))
+            .entrySet()
+            .stream()
+            .filter((Map.Entry<GraphDto.NodeDto, Long> e) -> e.getValue() > 1)
+            .findAny()
+            .ifPresent((Map.Entry<GraphDto.NodeDto, Long> e) -> {
+                throw new BadRequestException("Job can't be used more than once in pipeline");
+            });
+    }
+
+    /**
+     * Format dependencies result for wait node.
+     *
+     * @param waitNodeDependencies  final result wait dependencies
+     * @param dependencies dependencies for some pipeline stage id
+     * @return String formated dependencies result
+     */
+    private static String formatDependencies(
+            StringBuilder waitNodeDependencies,
+            String dependencies) {
+        if(waitNodeDependencies.toString().isEmpty()) {
+            return dependencies;
+        } else {
+            return String.format(" && %s", dependencies);
+        }
     }
 
     /**
@@ -594,7 +722,9 @@ public class PipelineService {
                                                .stream()
                                                .filter(parameter -> K8sUtils.CONFIGMAP.equals(parameter.getName()) ||
                                                    GRAPH_ID.equals(parameter.getName()) ||
-                                                   PIPELINE_ID_LABEL.equals(parameter.getName()))
+                                                   PIPELINE_ID_LABEL.equals(parameter.getName()) ||
+                                                   NODE_NAME.equals(parameter.getName()) ||
+                                                   NODE_OPERATION.equals(parameter.getName()))
                                                .collect(Collectors.toList()));
 
                         dagTask
@@ -630,6 +760,8 @@ public class PipelineService {
             .inputs(new Inputs()
                         .addParametersItem(new Parameter().name(K8sUtils.CONFIGMAP))
                         .addParametersItem(new Parameter().name(PIPELINE_ID_LABEL))
+                        .addParametersItem(new Parameter().name(NODE_NAME))
+                        .addParametersItem(new Parameter().name(NODE_OPERATION))
                         .addParametersItem(new Parameter().name(LIMITS_CPU))
                         .addParametersItem(new Parameter().name(LIMITS_MEMORY))
                         .addParametersItem(new Parameter().name(REQUESTS_CPU))
@@ -680,7 +812,11 @@ public class PipelineService {
             .metadata(new TemplateMeta().labels(Map.of(Constants.JOB_ID_LABEL,
                                                        "{{inputs.parameters.configMap}}",
                                                         PIPELINE_ID_LABEL,
-                                                       "{{inputs.parameters.pipelineId}}")));
+                                                       "{{inputs.parameters.pipelineId}}",
+                                                        NODE_NAME,
+                                                       "{{inputs.parameters.name}}",
+                                                        NODE_OPERATION,
+                                                       "{{inputs.parameters.operation}}")));
     }
 
     /**
@@ -701,7 +837,9 @@ public class PipelineService {
             .addParametersItem(new Parameter().name(IMAGE_PULL_POLICY))
             .addParametersItem(new Parameter().name(CONTAINER_NODE_ID))
             .addParametersItem(new Parameter().name(PIPELINE_ID_LABEL))
-            .addParametersItem(new Parameter().name(GRAPH_ID));
+            .addParametersItem(new Parameter().name(GRAPH_ID))
+            .addParametersItem(new Parameter().name(NODE_NAME))
+            .addParametersItem(new Parameter().name(NODE_OPERATION));
         Container container = new Container()
             .image(String.format(INPUT_PARAMETER_PATTERN, IMAGE_LINK))
             .imagePullPolicy(String.format(INPUT_PARAMETER_PATTERN, IMAGE_PULL_POLICY));
@@ -726,10 +864,17 @@ public class PipelineService {
             .container(container)
             .metadata(new TemplateMeta().labels(Map.of(Constants.CONTAINER_NODE_ID,
                                                        String.format(INPUT_PARAMETER_PATTERN,
-                                                                     Constants.CONTAINER_NODE_ID),
+                                                               Constants.CONTAINER_NODE_ID),
                                                        Constants.PIPELINE_ID_LABEL,
                                                        String.format(INPUT_PARAMETER_PATTERN,
-                                                                     Constants.PIPELINE_ID_LABEL))));
+                                                               Constants.PIPELINE_ID_LABEL),
+                                                       NODE_NAME,
+                                                       String.format(INPUT_PARAMETER_PATTERN,
+                                                               Constants.NODE_NAME),
+                                                       NODE_OPERATION,
+                                                       String.format(INPUT_PARAMETER_PATTERN,
+                                                               Constants.NODE_OPERATION))));
+
     }
 
     /**
@@ -742,7 +887,13 @@ public class PipelineService {
             .name(NOTIFICATION_TEMPLATE_NAME)
             .inputs(new Inputs()
                         .addParametersItem(new Parameter().name(Constants.NODE_NOTIFICATION_RECIPIENTS))
-                        .addParametersItem(new Parameter().name(Constants.NODE_NOTIFICATION_MESSAGE)))
+                        .addParametersItem(new Parameter().name(Constants.NODE_NOTIFICATION_MESSAGE))
+                        .addParametersItem(new Parameter().name(NODE_NAME))
+                        .addParametersItem(new Parameter().name(NODE_OPERATION)))
+            .metadata(new TemplateMeta().labels(Map.of(NODE_NAME,
+                        "{{inputs.parameters.name}}",
+                        NODE_OPERATION,
+                        "{{inputs.parameters.operation}}")))
             .container(new Container()
                            .image(notificationImage)
                            .command(List.of("/bin/bash", "-c", "--"))
@@ -763,6 +914,45 @@ public class PipelineService {
                                                                 Constants.MEMORY_FIELD,
                                                                 Quantity.parse("100M")))
                                           .build()));
+    }
+
+    /**
+     * Creating pipeline template.
+     *
+     * @return Template
+     */
+    private Template createPipelineTemplate() {
+        return new Template()
+                .name(PIPELINE_TEMPLATE_NAME)
+                .inputs(new Inputs()
+                        .addParametersItem(new Parameter().name(PIPELINE_ID))
+                        .addParametersItem(new Parameter().name(NODE_NAME))
+                        .addParametersItem(new Parameter().name(NODE_OPERATION)))
+                .resource(new Resource()
+                        .action(Constants.CREATE_ACTION)
+                        .manifest(String.format("{\"apiVersion\": \"argoproj.io/v1alpha1\"," +
+                                        "\"kind\": \"Workflow\",\"metadata\": {" +
+                                        "\"generateName\": \"{{inputs.parameters.%s}}-\"," +
+                                        "\"labels\": {\"workflows.argoproj.io/workflow-template\": " +
+                                        "\"{{inputs.parameters.%s}}\"}},\"spec\": {" +
+                                        "\"ttlStrategy\":" +
+                                        "{\"secondsAfterCompletion\":%s," +
+                                        "\"secondsAfterSuccess\":%s," +
+                                        "\"secondsAfterFailure\":%s}," +
+                                        "\"workflowTemplateRef\": {\"name\":\"{{inputs.parameters.%s}}\"}}}",
+                                PIPELINE_ID,
+                                PIPELINE_ID,
+                                argoKubernetesService.getSecondsAfterCompletion(),
+                                argoKubernetesService.getSecondsAfterSuccess(),
+                                argoKubernetesService.getSecondsAfterFailure(),
+                                PIPELINE_ID))
+                        .successCondition("status.phase == Succeeded")
+                        .failureCondition("status.phase in (Failed, Error)")
+                )
+                .metadata(new TemplateMeta().labels(Map.of(NODE_NAME,
+                                                           "{{inputs.parameters.name}}",
+                                                           NODE_OPERATION,
+                                                           "{{inputs.parameters.operation}}")));
     }
 
     /**
@@ -810,6 +1000,7 @@ public class PipelineService {
         List<Template> templates = new ArrayList<>();
         templates.add(createNotificationTemplate());
         templates.add(createSparkTemplate(namespace));
+        templates.add(createPipelineTemplate());
         templates.add(createContainerTemplate(false, false));
         templates.add(createContainerTemplate(false, true));
         templates.add(createContainerTemplate(true, false));
@@ -831,6 +1022,95 @@ public class PipelineService {
     }
 
     /**
+     * Update the pipeline parameters with a predefined condition
+     *
+     * @param projectId projectId
+     * @param targetPipelineId targetPipelineId
+     * @param func function for updating pipeline ids
+     */
+    private void updatePipelineDependency(String projectId,
+                                          String targetPipelineId, Function<PipelineParams, Set<String>> func) {
+        WorkflowTemplate workflowTemplate =
+                argoKubernetesService.getWorkflowTemplate(projectId, targetPipelineId);
+        PipelineParams pipelineParams = workflowTemplate.getSpec().getPipelineParams();
+        Set<String> nodePipelineIds = func.apply(pipelineParams);
+        workflowTemplate.getSpec().setPipelineParams(pipelineParams.dependentPipelineIds(nodePipelineIds));
+        argoKubernetesService.createOrReplaceWorkflowTemplate(projectId, workflowTemplate);
+    }
+
+    /**
+     * Retrieve pipeline Ids from definition
+     *
+     * @param jsonNode jsonNode
+     * @return Set<String> List of pipeline IDs without duplicates
+     */
+    private static Set<String> getPipelineIdsByDefinition(JsonNode jsonNode) {
+        try {
+            return GraphDto.parseGraph(Objects.requireNonNullElse(jsonNode,
+                            new ObjectMapper().readTree("{\"graph\":[]}")))
+                    .getNodes()
+                    .stream()
+                    .filter(e -> e.getValue().get(NODE_OPERATION).equals(NODE_OPERATION_PIPELINE))
+                    .map(k -> k.getValue().get(NODE_PIPELINE_ID))
+                    .collect(Collectors.toCollection(HashSet::new));
+        } catch (JsonProcessingException e) {
+            LOGGER.error("An error occurred while parsing: {}", e.getLocalizedMessage());
+            throw new BadRequestException("Required connection has incorrect structure");
+        }
+    }
+
+    /**
+     * Comparing pipelines to identify differences
+     *
+     * @param projectId     projectId
+     * @param id            id
+     * @param oldDefinition old definition for pipeline
+     * @param newDefinition definition for pipeline with updates
+     */
+    public void checkPipelineDependencies(String projectId, String id,
+                                          JsonNode oldDefinition,
+                                          JsonNode newDefinition) {
+        Set<String> oldIds = getPipelineIdsByDefinition(oldDefinition);
+        Set<String> newIds = getPipelineIdsByDefinition(newDefinition);
+
+        newIds.stream()
+                .filter(element -> !oldIds.contains(element))
+                .forEach((String targetPipelineId) -> {
+                    updatePipelineDependency(projectId, targetPipelineId,
+                            (PipelineParams pipelineParams) -> {
+                                Set<String> pipelineIDs =
+                                        Objects.requireNonNullElse(pipelineParams.getDependentPipelineIds(),
+                                                new HashSet<>());
+                                pipelineIDs.add(id);
+                                LOGGER.info(
+                                        "Pipeline dependency {} has been added to the pipeline {}",
+                                        id,
+                                        targetPipelineId);
+                                return pipelineIDs;
+                            });
+                });
+
+        oldIds.stream()
+                .filter(element -> !newIds.contains(element))
+                .forEach((String targetPipelineId) -> {
+                    updatePipelineDependency(projectId, targetPipelineId,
+                            ((PipelineParams pipelineParams) -> {
+                                Set<String> pipelineIDs =
+                                        Objects.requireNonNullElse(pipelineParams.getDependentPipelineIds(),
+                                                new HashSet<>());
+                                pipelineIDs = pipelineIDs.stream()
+                                        .filter(pipelineId -> !pipelineId.equals(id))
+                                        .collect(Collectors.toSet());
+                                LOGGER.info(
+                                        "Pipeline dependency {} has been removed from pipeline {}",
+                                        id,
+                                        targetPipelineId);
+                                return pipelineIDs;
+                            }));
+                });
+    }
+
+    /**
      * Create and save pipeline.
      *
      * @param id         pipeline id
@@ -841,7 +1121,7 @@ public class PipelineService {
     WorkflowTemplate createWorkflowTemplate(
         String projectId, String id, String name, JsonNode definition, PipelineParams params) {
         GraphDto graphDto = GraphDto.parseGraph(definition);
-        GraphDto.validateGraphPipeline(graphDto, projectId, argoKubernetesService);
+        GraphDto.validateGraphPipeline(graphDto, projectId, id, argoKubernetesService);
 
         WorkflowTemplate workflowTemplate = new WorkflowTemplate();
         setMeta(workflowTemplate, id, name, definition);
@@ -878,19 +1158,18 @@ public class PipelineService {
      * @param definition pipeline definition
      * @return pipeline id
      */
-    public String create(String projectId, String name, JsonNode definition, PipelineParams params) {
+    public String create(String projectId, String name,
+                         JsonNode definition, PipelineParams params) {
         checkPipelineName(projectId, null, name);
         String id =
-                KubernetesService.getUniqueEntityName((String wfId) -> argoKubernetesService.getWorkflowTemplate(
-                        projectId,
-                        wfId));
-
-        argoKubernetesService.createOrReplaceWorkflowTemplate(projectId,
-                createWorkflowTemplate(projectId,
-                        id,
-                        name,
-                        definition,
-                        params));
+                KubernetesService.getUniqueEntityName(
+                        (String wfId) -> argoKubernetesService.getWorkflowTemplate(
+                                projectId,
+                                wfId));
+        WorkflowTemplate workflowTemplate = createWorkflowTemplate(projectId, id, name, definition, params);
+        addParametersToDagTasks(workflowTemplate, projectId);
+        argoKubernetesService.createOrReplaceWorkflowTemplate(projectId, workflowTemplate);
+        checkPipelineDependencies(projectId, id, null, definition);
         return id;
     }
 
@@ -1051,6 +1330,7 @@ public class PipelineService {
                 .id(id)
                 .name(metadata.getLabels().get(Constants.NAME))
                 .tags(checkIfTagsExistsInTemplate(workflowTemplate.getSpec().getPipelineParams()))
+                .dependentPipelineIds(checkIfDependsExistsInTemplate(workflowTemplate.getSpec().getPipelineParams()))
                 .status(K8sUtils.DRAFT_STATUS)
                 .lastModified(metadata.getAnnotations().get(Constants.LAST_MODIFIED));
             if (argoKubernetesService.isCronWorkflowReadyOrExist(projectId, id)) {
@@ -1091,7 +1371,8 @@ public class PipelineService {
     public void update(final String projectId, final String id, final JsonNode definition,
                        final PipelineParams params, final String name) {
         try {
-            argoKubernetesService.getWorkflowTemplate(projectId, id);
+            WorkflowTemplate oldWorkflowTemplate = argoKubernetesService.getWorkflowTemplate(projectId, id);
+            checkPipelineDependencies(projectId, id, getDefinition(oldWorkflowTemplate), definition);
         } catch (ResourceNotFoundException e) {
             LOGGER.warn("Cannot find workflow template for {} pipeline", id);
             throw new BadRequestException(String.format("Pipeline with id %s doesn't exist", id), e);
@@ -1103,11 +1384,9 @@ public class PipelineService {
             LOGGER.info("No workflows to remove");
         }
         argoKubernetesService.deleteSecretsByLabels(projectId,
-                                                    new HashMap<>(Map.of(Constants.PIPELINE_ID_LABEL,
-                                                                         id,
-                                                                         Constants.CONTAINER_STAGE,
-                                                                         "true")));
+                new HashMap<>(Map.of(Constants.PIPELINE_ID_LABEL, id, Constants.CONTAINER_STAGE, "true")));
         WorkflowTemplate newWorkflowTemplate = createWorkflowTemplate(projectId, id, name, definition, params);
+        addParametersToDagTasks(newWorkflowTemplate, projectId);
         argoKubernetesService.createOrReplaceWorkflowTemplate(projectId, newWorkflowTemplate);
     }
 
@@ -1118,13 +1397,23 @@ public class PipelineService {
      * @param id        pipeline id
      */
     public void delete(String projectId, String id) {
-        argoKubernetesService.deleteWorkflowTemplate(projectId, id);
-        argoKubernetesService.deleteWorkflow(projectId, id);
-        argoKubernetesService.deleteSecretsByLabels(projectId,
-                                                    new HashMap<>(Map.of(Constants.PIPELINE_ID_LABEL,
-                                                                         id,
-                                                                         Constants.CONTAINER_STAGE,
-                                                                         "true")));
+        WorkflowTemplate workflowTemplate = argoKubernetesService.getWorkflowTemplate(projectId, id);
+
+        if (workflowTemplate.getSpec().getPipelineParams().getDependentPipelineIds() != null &&
+                !workflowTemplate.getSpec().getPipelineParams().getDependentPipelineIds().isEmpty()) {
+            throw new BadRequestException("The pipeline cannot be removed. There are dependencies.");
+        } else {
+
+            checkPipelineDependencies(projectId, id, getDefinition(workflowTemplate), null);
+
+            argoKubernetesService.deleteWorkflowTemplate(projectId, id);
+            argoKubernetesService.deleteWorkflow(projectId, id);
+            argoKubernetesService.deleteSecretsByLabels(projectId,
+                    new HashMap<>(Map.of(Constants.PIPELINE_ID_LABEL,
+                            id,
+                            Constants.CONTAINER_STAGE,
+                            "true")));
+        }
     }
 
     /**
@@ -1135,14 +1424,19 @@ public class PipelineService {
      */
     public void run(String projectId, String id) {
         WorkflowTemplate workflowTemplate = argoKubernetesService.getWorkflowTemplate(projectId, id);
-        addParametersToDagTasks(workflowTemplate, projectId);
         ResourceQuota quota = argoKubernetesService.getResourceQuota(projectId, Constants.QUOTA_NAME);
         validateResourceAvailability(quota, workflowTemplate);
         argoKubernetesService.createOrReplaceWorkflowTemplate(projectId, workflowTemplate);
         argoKubernetesService.deleteWorkflow(projectId, id);
         Workflow workflow = new Workflow();
-        workflow.setMetadata(new ObjectMetaBuilder().withName(id).build());
+        workflow.setMetadata(new ObjectMetaBuilder()
+            .withName(id)
+            .addToLabels(Constants.TYPE, Constants.TYPE_PIPELINE)
+            .addToLabels(Constants.STARTED_BY, authenticationService.getUserInfo().getUsername())
+            .build()
+        );
         workflow.setSpec(new WorkflowSpec().workflowTemplateRef(new WorkflowTemplateRef().name(id)));
+        workflowService.trackWorkflowEvents(projectId, id);
         argoKubernetesService.createOrReplaceWorkflow(projectId, workflow);
     }
 
@@ -1214,6 +1508,78 @@ public class PipelineService {
     public CronPipelineDto getCronById(String projectId, String id) {
         CronWorkflow cronWorkflow = argoKubernetesService.getCronWorkflow(projectId, id);
         return CronPipelineDto.fromSpec(cronWorkflow.getSpec());
+    }
+
+    /**
+     * Getting pipeline history
+     *
+     * @param projectId  project id
+     * @param pipelineId pipeline id
+     * @return List of pipeline history DTO
+     */
+    public List<PipelineHistoryResponseDto> getPipelineHistory(String projectId, String pipelineId) {
+        Map<String, PipelineHistory> pipelineHistories = pipelineHistoryRepository.findAll(
+                String.format("%s:%s_%s",PIPELINE_HISTORY, projectId, pipelineId)
+        );
+
+        return pipelineHistories
+                .entrySet()
+                .stream()
+                .map(pipelineHistory -> PipelineHistoryResponseDto
+                        .builder()
+                        .id(pipelineHistory.getValue().getId())
+                        .type(pipelineHistory.getValue().getType())
+                        .status(pipelineHistory.getValue().getStatus())
+                        .startedAt(pipelineHistory.getValue().getStartedAt())
+                        .finishedAt(pipelineHistory.getValue().getFinishedAt())
+                        .startedBy(pipelineHistory.getValue().getStartedBy())
+                        .nodes(getPipelineNodesHistory(
+                                        pipelineHistory.getValue().getNodes(),
+                                        projectId,
+                                        pipelineHistory.getKey()
+                        ))
+                        .build()
+                )
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Getting pipeline nodes history for specific pipeline run
+     *
+     * @param nodes             pipeline child nodes
+     * @param projectId         project id
+     * @param pipelineHistoryId pipeline history id for specific pipeline run
+     * @return List of pipeline nodes history DTO
+     */
+    private List<PipelineNodesHistoryResponseDto> getPipelineNodesHistory(
+            List<String> nodes,
+            String projectId,
+            String pipelineHistoryId
+    ) {
+        List<PipelineNodesHistoryResponseDto> pipelineNodesHistoryResponse = new ArrayList<>();
+
+        for (String node: nodes) {
+            Map<String, PipelineNodeHistory> pipelineNodesHistory = pipelineHistoryRepository.findAll(
+                    String.format("%s:%s_%s_%s", PIPELINE_NODE_HISTORY, projectId, node, pipelineHistoryId)
+            );
+            pipelineNodesHistory
+                    .entrySet()
+                    .stream()
+                    .map(pipelineNodeHistory -> PipelineNodesHistoryResponseDto
+                            .builder()
+                            .id(pipelineNodeHistory.getValue().getId())
+                            .name(pipelineNodeHistory.getValue().getName())
+                            .operation(pipelineNodeHistory.getValue().getOperation())
+                            .status(pipelineNodeHistory.getValue().getStatus())
+                            .startedAt(pipelineNodeHistory.getValue().getStartedAt())
+                            .finishedAt(pipelineNodeHistory.getValue().getFinishedAt())
+                            .logId(pipelineNodeHistory.getKey())
+                            .build()
+                    )
+                    .findFirst()
+                    .ifPresent(pipelineNodesHistoryResponse::add);
+        }
+        return pipelineNodesHistoryResponse;
     }
 
     /**
@@ -1292,23 +1658,6 @@ public class PipelineService {
                           (String pId, String i) -> apiInstance.workflowServiceRetryWorkflow(pId,
                                                                                              i,
                                                                                              new WorkflowRetryRequest()));
-    }
-
-    /**
-     * Retrieve custom container logs
-     *
-     * @param projectId  project id
-     * @param pipelineId pipeline id
-     * @param nodeId     node id
-     * @return list of log entries
-     */
-    public List<LogDto> getCustomContainerLogs(String projectId, String pipelineId, String nodeId) {
-        return KubernetesService.getParsedLogs(() -> argoKubernetesService.getPodLogsByLabels(projectId,
-                                                                                              Map.of(
-                                                                                                  CONTAINER_NODE_ID,
-                                                                                                  nodeId,
-                                                                                                  PIPELINE_ID_LABEL,
-                                                                                                  pipelineId)));
     }
 
     /**
@@ -1405,6 +1754,9 @@ public class PipelineService {
                 if (NOTIFICATION_TEMPLATE_NAME.equals(dagTask.getTemplate())) {
                     return;
                 }
+                if (PIPELINE_TEMPLATE_NAME.equals(dagTask.getTemplate())) {
+                    return;
+                }
                 Map<String, Parameter> parameters = dagTask
                     .getArguments()
                     .getParameters()
@@ -1460,6 +1812,49 @@ public class PipelineService {
             return params.getTags();
         }
         return Collections.emptyList();
+    }
+
+    /**
+     * Getting dependentPipelineIds if they exist in pipeline params.
+     *
+     * @param params pipeline params
+     * @return Set of dependentPipelineIds or empty
+     */
+    public static Set<String> checkIfDependsExistsInTemplate(PipelineParams params) {
+        if (params != null && params.getDependentPipelineIds() != null) {
+            return params.getDependentPipelineIds();
+        }
+        return Collections.emptySet();
+    }
+
+    private static String checkDependencyForWaitNode(
+            List<GraphDto.NodeDto> waitNodes,
+            String depends) {
+        return waitNodes
+                .stream()
+                .filter(node -> node.getId().equals(depends))
+                .findFirst()
+                .map(GraphDto.NodeDto::getId)
+                .orElse(null);
+    }
+
+    private static List<String> parseDependenciesAsList(String dependencies) {
+        if(dependencies != null) {
+            return Arrays.asList(dependencies.split(Pattern.quote(" && ")));
+        }
+        return Collections.emptyList();
+    }
+
+    public static JsonNode getDefinition(HasMetadata metadata) {
+        try {
+            return MAPPER
+                    .readTree(Base64.decodeBase64(metadata
+                            .getMetadata()
+                            .getAnnotations()
+                            .get(Constants.DEFINITION)));
+        } catch (IOException e) {
+            throw new JsonParseException(e);
+        }
     }
 
     /**

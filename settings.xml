@@ -51,7 +51,7 @@
       <properties>
         <sonar.host.url>https://sonarcloud.io</sonar.host.url>
         <sonar.projectKey>vf:backend</sonar.projectKey>
-        <sonar.organization>ibagroup-eu</sonar.organization>
+        <sonar.organization>ibagomel</sonar.organization>
         <sonar.login>${env.SONAR_TOKEN}</sonar.login>
         <sonar.coverage.exclusions>**/config/**/*,**/dto/**/*,**/model/**/*,**/VfApiApplication*</sonar.coverage.exclusions>
         <sonar.coverage.jacoco.xmlReportPaths>target/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>

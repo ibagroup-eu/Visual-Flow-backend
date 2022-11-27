@@ -38,6 +38,7 @@ public final class Constants {
     public static final String NAME = "name";
     public static final String TYPE = "type";
     public static final String TYPE_JOB = "job";
+    public static final String TYPE_PIPELINE = "pipeline";
     public static final String DEFINITION = "definition";
     public static final String LAST_MODIFIED = "lastModified";
 
@@ -69,8 +70,11 @@ public final class Constants {
     public static final String CPU_FIELD = "cpu";
     public static final String MEMORY_FIELD = "memory";
     public static final String DRIVER_CORES = "DRIVER_CORES";
+    public static final String DRIVER_CORES_VALUE = "300m";
     public static final String DRIVER_MEMORY = "DRIVER_MEMORY";
+    public static final String DRIVER_MEMORY_VALUE = "300Mi";
     public static final String DRIVER_REQUEST_CORES = "DRIVER_REQUEST_CORES";
+    public static final String DRIVER_REQUEST_CORES_VALUE = "100m";
     public static final double MEMORY_OVERHEAD_FACTOR = 1.1;
     public static final String DAG_TEMPLATE_NAME = "dagTemplate";
 
@@ -91,10 +95,13 @@ public final class Constants {
     public static final String NODE_OPERATION = "operation";
     public static final String NODE_OPERATION_EDGE = "EDGE";
     public static final String NODE_OPERATION_JOB = "JOB";
+    public static final String NODE_OPERATION_PIPELINE = "PIPELINE";
     public static final String NODE_OPERATION_NOTIFICATION = "NOTIFICATION";
     public static final String NODE_OPERATION_CONTAINER = "CONTAINER";
-    public static final String NODE_JOB_NAME = "name";
+    public static final String NODE_OPERATION_WAIT = "WAIT";
+    public static final String NODE_NAME = "name";
     public static final String NODE_JOB_ID = "jobId";
+    public static final String NODE_PIPELINE_ID = "pipelineId";
     public static final String NODE_IMAGE_LINK = "image";
     public static final String NODE_REGISTRY_LINK = "registry";
     public static final String NODE_USERNAME = "username";
@@ -104,10 +111,8 @@ public final class Constants {
     public static final String NODE_MOUNT_PROJECT_PARAMS = "mountProjectParams";
     public static final String NODE_NOTIFICATION_RECIPIENTS = "addressees";
     public static final String NODE_NOTIFICATION_MESSAGE = "message";
-    public static final String NODE_NOTIFICATION_NAME = "name";
     public static final String KIND_JOB = "Job";
     public static final String KIND_PIPELINE = "Pipeline";
-    public static final String NODE_CONTAINER_NAME = "name";
     public static final String NODE_IMAGE_PULL_SECRET_TYPE = "imagePullSecretType";
     public static final String NODE_IMAGE_PULL_SECRET_NAME = "imagePullSecretName";
     public static final String CONTAINER_NODE_ID = "containerNodeId";
@@ -115,4 +120,7 @@ public final class Constants {
     public static final String TOKEN = "token";
     public static final String DOCKERCFG = "dockercfg";
     public static final String STARTED_BY = "startedBy";
+    public static final String PIPELINE_HISTORY = "pipeline_history";
+    public static final String PIPELINE_NODE_HISTORY = "pipeline_node_history";
+    public static final String LOGS = "logs";
 }

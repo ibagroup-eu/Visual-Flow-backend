@@ -111,7 +111,8 @@ public class JobRequestDto {
             String operation = node.getValue().get(OPERATION_FIELD);
             if ("READ".equals(operation) && targets.contains(node.getId())) {
                 throw new BadRequestException(String.format("%s stage can have only output arrows", operation));
-            } else if ("WRITE".equals(operation) && (sources.contains(node.getId()) || targetsCount != 1)) {
+            } else if (("WRITE".equals(operation) ||
+                        "VALIDATE".equals(operation)) && (sources.contains(node.getId()) || targetsCount != 1)) {
                 throw new BadRequestException(String.format("%s stage must have only one input arrows",
                                                             operation));
             } else if (("UNION".equals(operation) || "JOIN".equals(operation) || "CDC".equals(operation)) &&
@@ -123,7 +124,11 @@ public class JobRequestDto {
                 "REMOVE_DUPLICATES".equals(operation) ||
                 "SORT".equals(operation) ||
                 "CACHE".equals(operation) ||
-                "SLICE".equals(operation)) && targetsCount != 1) {
+                "SLICE".equals(operation) ||
+                "WITH_COLUMN".equals(operation) ||
+                "PIVOT".equals(operation) ||
+                "DATETIME".equals(operation) ||
+                "STRING".equals(operation)) && targetsCount != 1) {
                 throw new BadRequestException(String.format("%s stage must have one input arrows", operation));
             } else if (!List.of("READ",
                                 "WRITE",
@@ -136,7 +141,12 @@ public class JobRequestDto {
                                 "REMOVE_DUPLICATES",
                                 "SORT",
                                 "CACHE",
-                                "SLICE").contains(operation)) {
+                                "SLICE",
+                                "WITH_COLUMN",
+                                "VALIDATE",
+                                "PIVOT",
+                                "DATETIME",
+                                "STRING").contains(operation)) {
                 throw new BadRequestException("Invalid stage type");
             }
         }

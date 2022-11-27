@@ -29,13 +29,7 @@ import by.iba.vfapi.dto.projects.ParamsDto;
 import by.iba.vfapi.dto.projects.ConnectDto;
 import by.iba.vfapi.dto.projects.ConnectionsDto;
 import by.iba.vfapi.exceptions.BadRequestException;
-import by.iba.vfapi.model.argo.Arguments;
-import by.iba.vfapi.model.argo.DagTask;
-import by.iba.vfapi.model.argo.DagTemplate;
-import by.iba.vfapi.model.argo.Parameter;
-import by.iba.vfapi.model.argo.Template;
-import by.iba.vfapi.model.argo.WorkflowTemplate;
-import by.iba.vfapi.model.argo.WorkflowTemplateSpec;
+import by.iba.vfapi.model.argo.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -520,7 +514,10 @@ class TransferServiceTest {
                                                                                                                            .name(
                                                                                                                                K8sUtils.CONFIGMAP)
                                                                                                                            .value(
-                                                                                                                               "jobFromPipeline"))))))));
+                                                                                                                               "jobFromPipeline")))))))
+                                                            .pipelineParams(new PipelineParams()
+                                                                    .dependentPipelineIds(Set.of("13sdsd-32131"))
+                                                            ));
         WorkflowTemplate workflowTemplate2 = new WorkflowTemplate();
         workflowTemplate2.setMetadata(new ObjectMetaBuilder()
                                           .withName("pipelineId2")
@@ -538,7 +535,9 @@ class TransferServiceTest {
                                                                                                                            .name(
                                                                                                                                K8sUtils.CONFIGMAP)
                                                                                                                            .value(
-                                                                                                                               "jobFromPipeline"))))))));
+                                                                                                                               "jobFromPipeline")))))))
+                                                            .pipelineParams(new PipelineParams()
+                                                                    .dependentPipelineIds(Set.of())));
 
         WorkflowTemplate workflowTemplate3 = new WorkflowTemplate();
         workflowTemplate3.setMetadata(new ObjectMetaBuilder()
@@ -557,7 +556,9 @@ class TransferServiceTest {
                                                                                                                            .name(
                                                                                                                                K8sUtils.CONFIGMAP)
                                                                                                                            .value(
-                                                                                                                               "jobFromPipeline"))))))));
+                                                                                                                               "jobFromPipeline")))))))
+                                                            .pipelineParams(new PipelineParams()
+                                                                    .dependentPipelineIds(Set.of())));
         List<WorkflowTemplate> workflowTemplates = new ArrayList<>();
         workflowTemplates.add(workflowTemplate1);
         when(argoKubernetesService.getAllWorkflowTemplates(anyString())).thenReturn(workflowTemplates);

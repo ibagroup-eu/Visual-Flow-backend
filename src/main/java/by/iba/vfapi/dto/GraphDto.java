@@ -21,6 +21,7 @@ package by.iba.vfapi.dto;
 
 import by.iba.vfapi.exceptions.BadRequestException;
 import by.iba.vfapi.model.ContainerStageConfig;
+import by.iba.vfapi.services.ArgoKubernetesService;
 import by.iba.vfapi.services.KubernetesService;
 import by.iba.vfapi.services.PipelineService;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -85,20 +86,27 @@ public class GraphDto {
      *
      * @param graphDto          pipeline's graph dto
      * @param projectId         project's id
-     * @param kubernetesService k8s service to perform sanity check on jobs
+     * @param service k8s service to perform sanity check on jobs
      */
     public static void validateGraphPipeline(
-        GraphDto graphDto, String projectId, KubernetesService kubernetesService) {
+        GraphDto graphDto, String projectId, String id, ArgoKubernetesService service) {
         final Map<String, Consumer<NodeDto>> nodeValidators = Map.of(Constants.NODE_OPERATION_JOB,
                                                                      nodeDto -> validateJobNode(nodeDto,
                                                                                                 projectId,
-                                                                                                kubernetesService),
+                                                                                                service),
                                                                      Constants.NODE_OPERATION_NOTIFICATION,
                                                                      GraphDto::validateNotificationNode,
                                                                      Constants.NODE_OPERATION_CONTAINER,
                                                                      nodeDto -> validateContainerNode(nodeDto,
-                                                                                                      projectId,
-                                                                                                      kubernetesService));
+                                                                                                projectId,
+                                                                                                service),
+                                                                     Constants.NODE_OPERATION_PIPELINE,
+                                                                     nodeDto -> validatePipelineNode(nodeDto,
+                                                                                                projectId,
+                                                                                                id,
+                                                                                                service),
+                                                                     Constants.NODE_OPERATION_WAIT,
+                                                                     (NodeDto nodeDto) -> {});
         if ((graphDto.edges == null || graphDto.edges.isEmpty()) &&
             (graphDto.nodes == null || graphDto.nodes.isEmpty())) {
             return;
@@ -136,8 +144,8 @@ public class GraphDto {
      */
     private static void validateJobNode(NodeDto jobNode, String projectId, KubernetesService service) {
         Map<String, String> nodeValues = jobNode.value;
-        if (!nodeValues.containsKey(Constants.NODE_JOB_NAME) ||
-            nodeValues.get(Constants.NODE_JOB_NAME).isEmpty()) {
+        if (!nodeValues.containsKey(Constants.NODE_NAME) ||
+            nodeValues.get(Constants.NODE_NAME).isEmpty()) {
             throw new BadRequestException("Job node must have a name");
         }
         if (!nodeValues.containsKey(Constants.NODE_JOB_ID)) {
@@ -154,11 +162,37 @@ public class GraphDto {
         }
     }
 
+    /**
+     * Validates a pipeline node
+     *
+     * @param pipelineNode   pipeline node
+     * @param projectId id of the project
+     * @param service   kubernetes service to perform pipeline sanity check
+     */
+    private static void validatePipelineNode(NodeDto pipelineNode, String projectId, String id,
+                                             ArgoKubernetesService service) {
+        Map<String, String> nodeValues = pipelineNode.value;
+        if (!nodeValues.containsKey(Constants.NODE_NAME) ||
+                nodeValues.get(Constants.NODE_NAME).isEmpty()) {
+            throw new BadRequestException("Pipeline node must have a name");
+        }
+        if (!nodeValues.containsKey(Constants.NODE_PIPELINE_ID)) {
+            throw new BadRequestException("Pipeline node is missing pipeline's id");
+        }
+        String pipelineId = nodeValues.get(Constants.NODE_PIPELINE_ID);
+        if (!service.isWorkflowTemplateExist(projectId, pipelineId)) {
+            throw new BadRequestException("Pipeline node is referring to non-existing pipeline");
+        }
+        if(id.equals(pipelineId)){
+            throw new BadRequestException("Pipeline node should start another pipeline, not itself");
+        }
+    }
+
     private static void validateContainerNode(
         NodeDto containerNode, String namespace, KubernetesService kubernetesService) {
         Map<String, String> nodeValues = containerNode.value;
-        if (!nodeValues.containsKey(Constants.NODE_CONTAINER_NAME) ||
-            nodeValues.get(Constants.NODE_CONTAINER_NAME).isEmpty()) {
+        if (!nodeValues.containsKey(Constants.NODE_NAME) ||
+            nodeValues.get(Constants.NODE_NAME).isEmpty()) {
             throw new BadRequestException("Container node must have a name");
         }
         if (!nodeValues.containsKey(Constants.NODE_IMAGE_LINK) ||
@@ -232,8 +266,8 @@ public class GraphDto {
      */
     private static void validateNotificationNode(NodeDto notificationNode) {
         Map<String, String> nodeValues = notificationNode.value;
-        if (!nodeValues.containsKey(Constants.NODE_NOTIFICATION_NAME) ||
-            nodeValues.get(Constants.NODE_NOTIFICATION_NAME).isEmpty()) {
+        if (!nodeValues.containsKey(Constants.NODE_NAME) ||
+            nodeValues.get(Constants.NODE_NAME).isEmpty()) {
             throw new BadRequestException("Notification node must have a name");
         }
         if (!nodeValues.containsKey(Constants.NODE_NOTIFICATION_MESSAGE)) {

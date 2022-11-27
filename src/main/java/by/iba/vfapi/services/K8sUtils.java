@@ -101,7 +101,7 @@ public class K8sUtils {
      *
      * @return resourceRequirements
      */
-    static ResourceRequirements getResourceRequirements(Map<String, String> params) {
+    public static ResourceRequirements getResourceRequirements(Map<String, String> params) {
         Quantity limitMem = Quantity.parse(Quantity
                                                .getAmountInBytes(Quantity.parse(params.get(Constants.DRIVER_MEMORY)))
                                                .multiply(BigDecimal.valueOf(Constants.MEMORY_OVERHEAD_FACTOR))

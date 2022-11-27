@@ -19,7 +19,8 @@
 
 package by.iba.vfapi.services;
 
-import by.iba.vfapi.dao.PodEventRepositoryImpl;
+import by.iba.vfapi.dao.JobHistoryRepository;
+import by.iba.vfapi.dao.LogRepositoryImpl;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.dto.projects.ParamDto;
 import by.iba.vfapi.dto.projects.ParamsDto;
@@ -56,9 +57,7 @@ import io.fabric8.kubernetes.api.model.ServiceAccount;
 import io.fabric8.kubernetes.api.model.ServiceAccountBuilder;
 import io.fabric8.kubernetes.api.model.ServiceAccountList;
 import io.fabric8.kubernetes.api.model.ServiceAccountListBuilder;
-import io.fabric8.kubernetes.api.model.StatusBuilder;
 import io.fabric8.kubernetes.api.model.WatchEvent;
-import io.fabric8.kubernetes.api.model.WatchEventBuilder;
 import io.fabric8.kubernetes.api.model.authorization.v1.SubjectAccessReview;
 import io.fabric8.kubernetes.api.model.authorization.v1.SubjectAccessReviewBuilder;
 import io.fabric8.kubernetes.api.model.metrics.v1beta1.ContainerMetricsBuilder;
@@ -72,7 +71,6 @@ import io.fabric8.kubernetes.api.model.rbac.RoleBinding;
 import io.fabric8.kubernetes.api.model.rbac.RoleBindingBuilder;
 import io.fabric8.kubernetes.api.model.rbac.RoleBindingList;
 import io.fabric8.kubernetes.api.model.rbac.RoleBindingListBuilder;
-import io.fabric8.kubernetes.client.WatcherException;
 import io.fabric8.kubernetes.client.server.mock.KubernetesServer;
 import java.net.HttpURLConnection;
 import java.util.List;
@@ -99,22 +97,21 @@ class KubernetesServiceTest {
     private static final String APP_NAME = "vf";
     private static final String APP_NAME_LABEL = "testApp";
     private static final String PVC_MOUNT_PATH = "/files";
+    private static final String IMAGE_PULL_SECRET = "vf-dev-image-pull";
     private static final Long EVENT_WAIT_PERIOD_MS = 10L;
 
     private final KubernetesServer server = new KubernetesServer();
 
     @Mock
     private AuthenticationService authenticationServiceMock;
-    @Mock
-    private PodEventRepositoryImpl podEventRepository;
 
     private KubernetesService kubernetesService;
 
     @BeforeEach
     void setUp() {
         server.before();
-        kubernetesService =
-            new KubernetesService(server.getClient(), APP_NAME, APP_NAME_LABEL, PVC_MOUNT_PATH, authenticationServiceMock, podEventRepository);
+        kubernetesService = new KubernetesService(
+            server.getClient(), APP_NAME, APP_NAME_LABEL, PVC_MOUNT_PATH, IMAGE_PULL_SECRET, authenticationServiceMock);
     }
 
     @AfterEach
@@ -847,7 +844,6 @@ class KubernetesServiceTest {
 
     @Test
     void testGetPodsByLabels() {
-        mockAuthenticationService();
         Pod pod = new PodBuilder()
             .withMetadata(new ObjectMetaBuilder()
                               .withName("cm1")
@@ -1103,31 +1099,61 @@ class KubernetesServiceTest {
             .withStatus(podStatus)
             .build();
         CountDownLatch latch = mock(CountDownLatch.class);
+        JobHistoryRepository historyRepository = mock(JobHistoryRepository.class);
+        LogRepositoryImpl logRepository = mock(LogRepositoryImpl.class);
 
-        server
-            .expect()
-            .post()
-            .withPath("/api/v1/namespaces/vf/pods")
-            .andReturn(HttpURLConnection.HTTP_CREATED, null)
-            .once();
         server.expect()
             .withPath("/api/v1/namespaces/vf/pods?fieldSelector=metadata.name%3Dpod1&watch=true")
             .andUpgradeToWebSocket()
             .open()
             .waitFor(EVENT_WAIT_PERIOD_MS)
-            .andEmit(outdatedEvent())
+            .andEmit(new WatchEvent(pod, "MODIFIED"))
             .done()
             .once();
-        kubernetesService.watchPod("vf", "pod1", latch);
-        kubernetesService.createPod("vf", pod);
+
+        assertNotNull(kubernetesService.watchPod("vf", "pod1", historyRepository, logRepository, latch),
+    "Should return Watch event");
     }
 
-    private static WatchEvent outdatedEvent() {
-        return new WatchEventBuilder().withStatusObject(
-            new StatusBuilder().withCode(HttpURLConnection.HTTP_GONE)
-                .withMessage(
-                    "410: The event in requested index is outdated and cleared (the requested history has been cleared [3/1]) [2]")
-                .build())
-            .build();
+    @Test
+    void testGetPodLabels() {
+        String name = "pod1";
+        String namespace = "namespace";
+        Pod pod = new PodBuilder()
+                .withMetadata(new ObjectMetaBuilder()
+                        .withName("pod1")
+                        .addToLabels(Constants.NODE_OPERATION, "JOB")
+                        .addToLabels(Constants.NODE_NAME, "NAME")
+                        .build())
+                .build();
+
+        server
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/namespace/pods/pod1")
+                .andReturn(HttpURLConnection.HTTP_OK, new PodBuilder(pod).build())
+                .once();
+
+        Map<String, String> result = kubernetesService.getPodLabels(namespace, name);
+
+        assertEquals(pod.getMetadata().getLabels(), result, "Pod must be equals to expected");
+    }
+
+    @Test
+    void testGetPodLogs() {
+
+        String namespace = "namespace";
+        String name = "pod1";
+
+        server
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/namespace/pods/pod1/log?pretty=false&container=main")
+                .andReturn(HttpURLConnection.HTTP_OK, "logs")
+                .once();
+
+        String result = kubernetesService.getPodLogs(namespace, name);
+
+        assertEquals("logs", result, "Pod must be equals to expected");
     }
 }

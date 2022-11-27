@@ -19,17 +19,10 @@
 
 package by.iba.vfapi.dao;
 
-import by.iba.vfapi.model.PodEvent;
-
-import java.util.Map;
-
-public interface PodEventRepository {
-
-    Map<String, PodEvent> findAll(String key);
-
-    void add(String key, PodEvent podEvent);
-
-    void delete(String key, String id);
-
-    PodEvent findById(String key, String id);
+/**
+ * LogRepository interface.
+ */
+public interface LogRepository {
+    String get(String key);
+    void set(String key, String value);
 }

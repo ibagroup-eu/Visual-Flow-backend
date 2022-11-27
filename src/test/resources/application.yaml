@@ -29,6 +29,9 @@ server:
       enabled: true
   servlet:
     context-path: /base
+db-service:
+  host: host
+  port: 1997
 oauth:
   url:
     base: https://basepath
@@ -67,9 +70,15 @@ argo:
   requests:
     cpu: 0.1
     memory: 64Mi
+  ttlStrategy:
+    secondsAfterCompletion: 5
+    secondsAfterSuccess: 5
+    secondsAfterFailure: 360
 redis:
   host: test
   port: 31380
   username: test
   password: test
-  database: 1
+  jobHistoryDatabase: 1
+  pipelineHistoryDatabase: 2
+  logDatabase: 3

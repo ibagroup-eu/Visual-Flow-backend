@@ -19,13 +19,13 @@
 
 package by.iba.vfapi.services;
 
-import by.iba.vfapi.dao.PodEventRepositoryImpl;
-import by.iba.vfapi.dto.Constants;
+import by.iba.vfapi.dao.JobHistoryRepository;
+import by.iba.vfapi.dao.LogRepositoryImpl;
+import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.services.auth.AuthenticationService;
-import io.fabric8.kubernetes.api.model.Pod;
-import io.fabric8.kubernetes.api.model.PodBuilder;
-import io.fabric8.kubernetes.api.model.PodStatus;
+import io.fabric8.kubernetes.api.model.StatusBuilder;
 import io.fabric8.kubernetes.api.model.WatchEvent;
+import io.fabric8.kubernetes.api.model.WatchEventBuilder;
 import io.fabric8.kubernetes.client.server.mock.KubernetesServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,28 +34,35 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.net.HttpURLConnection;
+
+import static org.mockito.Mockito.when;
+
 @ExtendWith(MockitoExtension.class)
 class PodServiceTest {
     private final KubernetesServer server = new KubernetesServer();
     private static final String APP_NAME = "vf";
     private static final String APP_NAME_LABEL = "testApp";
     private static final String PVC_MOUNT_PATH = "/files";
+    private static final String IMAGE_PULL_SECRET = "vf-dev-image-pull";
     private static final Long EVENT_WAIT_PERIOD_MS = 10L;
 
     @Mock
     private AuthenticationService authenticationServiceMock;
     @Mock
-    private PodEventRepositoryImpl podEventRepository;
-    @Mock
     private KubernetesService kubernetesService;
+    @Mock
+    private JobHistoryRepository historyRepository;
+    @Mock
+    private LogRepositoryImpl logRepository;
     private PodService podService;
 
     @BeforeEach
     void setUp() {
         server.before();
-        this.kubernetesService =
-            new KubernetesService(server.getClient(), APP_NAME, APP_NAME_LABEL, PVC_MOUNT_PATH, authenticationServiceMock, podEventRepository);
-        this.podService = new PodService(kubernetesService);
+        this.kubernetesService = new KubernetesService(
+            server.getClient(), APP_NAME, APP_NAME_LABEL, PVC_MOUNT_PATH, IMAGE_PULL_SECRET, authenticationServiceMock);
+        this.podService = new PodService(kubernetesService, historyRepository, logRepository);
     }
 
     @AfterEach
@@ -65,28 +72,32 @@ class PodServiceTest {
 
     @Test
     void testTrackPodEvents() {
-        PodStatus podStatus = new PodStatus();
-        podStatus.setPhase(K8sUtils.SUCCEEDED_STATUS);
-        Pod pod = new PodBuilder()
-            .withNewMetadata()
-            .withNamespace("vf")
-            .withName("pod1")
-            .addToLabels(Constants.TYPE, "job")
-            .addToLabels(Constants.STARTED_BY, "test_user")
-            .withResourceVersion("1")
-            .endMetadata()
-            .withStatus(podStatus)
-            .build();
+        mockAuthenticationService();
 
         server.expect()
             .withPath("/api/v1/namespaces/vf/pods?fieldSelector=metadata.name%3Dpod1&watch=true")
             .andUpgradeToWebSocket()
             .open()
             .waitFor(EVENT_WAIT_PERIOD_MS)
-            .andEmit(new WatchEvent(pod, "MODIFIED"))
+            .andEmit(outdatedEvent())
             .done()
             .once();
 
         podService.trackPodEvents("vf", "pod1");
+    }
+
+    private void mockAuthenticationService() {
+        UserInfo ui = new UserInfo();
+        ui.setSuperuser(true);
+        when(authenticationServiceMock.getUserInfo()).thenReturn(ui);
+    }
+
+    private static WatchEvent outdatedEvent() {
+        return new WatchEventBuilder().withStatusObject(
+            new StatusBuilder().withCode(HttpURLConnection.HTTP_GONE)
+                .withMessage(
+                    "410: The event in requested index is outdated and cleared (the requested history has been cleared [3/1]) [2]")
+                .build())
+            .build();
     }
 }

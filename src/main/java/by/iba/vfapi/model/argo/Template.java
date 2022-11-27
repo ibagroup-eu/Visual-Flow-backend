@@ -43,6 +43,7 @@ public class Template implements Serializable {
     private Inputs inputs;
     private String name;
     private String podSpecPatch;
+    private Resource resource;
 
     /**
      * Setter for podSpecPatch.
@@ -107,6 +108,17 @@ public class Template implements Serializable {
      */
     public Template name(String name) {
         this.name = name;
+        return this;
+    }
+
+    /**
+     * Setter for resource.
+     *
+     * @param resource resource
+     * @return this
+     */
+    public Template resource(Resource resource) {
+        this.resource = resource;
         return this;
     }
 }

@@ -19,7 +19,8 @@
 
 package by.iba.vfapi.services;
 
-import by.iba.vfapi.dao.PodEventRepositoryImpl;
+import by.iba.vfapi.dao.LogRepositoryImpl;
+import by.iba.vfapi.dao.PipelineHistoryRepository;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.model.argo.CronWorkflow;
 import by.iba.vfapi.model.argo.CronWorkflowList;
@@ -27,12 +28,17 @@ import by.iba.vfapi.model.argo.Workflow;
 import by.iba.vfapi.model.argo.WorkflowList;
 import by.iba.vfapi.model.argo.WorkflowTemplate;
 import by.iba.vfapi.model.argo.WorkflowTemplateList;
+import by.iba.vfapi.model.history.AbstractHistory;
 import by.iba.vfapi.services.auth.AuthenticationService;
+import by.iba.vfapi.services.watchers.WorkflowWatcher;
 import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
+import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+
 import lombok.Getter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -49,15 +55,24 @@ public class ArgoKubernetesService extends KubernetesService {
     private String argoExecutorLimitsCpu;
     @Value("${argo.limits.memory}")
     private String argoExecutorLimitsMemory;
+    @Value("${argo.ttlStrategy.secondsAfterCompletion}")
+    private String secondsAfterCompletion;
+    @Value("${argo.ttlStrategy.secondsAfterSuccess}")
+    private String secondsAfterSuccess;
+    @Value("${argo.ttlStrategy.secondsAfterFailure}")
+    private String secondsAfterFailure;
+    private LogRepositoryImpl logRepository;
 
     public ArgoKubernetesService(
         NamespacedKubernetesClient client,
         @Value("${namespace.app}") String appName,
         @Value("${namespace.label}") String appNameLabel,
         @Value("${pvc.mountPath}") final String pvcMountPath,
+        @Value("${job.imagePullSecret}") final String imagePullSecret,
         AuthenticationService authenticationService,
-        PodEventRepositoryImpl podEventRepository) {
-        super(client, appName, appNameLabel, pvcMountPath, authenticationService, podEventRepository);
+        LogRepositoryImpl logRepository) {
+        super(client, appName, appNameLabel, pvcMountPath, imagePullSecret, authenticationService);
+        this.logRepository = logRepository;
     }
 
     private MixedOperation<CronWorkflow, CronWorkflowList, Resource<CronWorkflow>> getCronWorkflowCrdClient(
@@ -131,6 +146,20 @@ public class ArgoKubernetesService extends KubernetesService {
             .inNamespace(namespaceId)
             .withName(name)
             .require());
+    }
+
+    /**
+     * Getting existence check of the workflowTemplate.
+     *
+     * @param namespaceId namespace name
+     * @param name        workflowTemplate name
+     * @return workflowTemplate
+     */
+    public boolean isWorkflowTemplateExist(final String namespaceId, final String name) {
+        return authenticatedCall(authenticatedClient -> getWorkflowTemplateCrdClient(authenticatedClient)
+                .inNamespace(namespaceId)
+                .withName(name)
+                .isReady());
     }
 
     /**
@@ -252,4 +281,24 @@ public class ArgoKubernetesService extends KubernetesService {
             .withName(name)
             .isReady());
     }
+
+    /**
+     * Monitors workflow's events in namespace.
+     *
+     * @param namespace         namespace
+     * @param workflowName      workflow's name
+     * @param historyRepository DAO for history
+     * @param latch             latch
+     * @return Watch
+     */
+    public Watch watchWorkflow(final String namespace, final String workflowName,
+                               final PipelineHistoryRepository<? extends AbstractHistory> historyRepository,
+                               final CountDownLatch latch) {
+        return authenticatedCall(authenticatedClient -> getWorkflowCrdClient(authenticatedClient)
+            .inNamespace(namespace)
+            .withName(workflowName)
+            .watch(new WorkflowWatcher(historyRepository, logRepository, latch, this)));
+    }
 }
+
+

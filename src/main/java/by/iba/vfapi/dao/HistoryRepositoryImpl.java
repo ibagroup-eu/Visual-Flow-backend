@@ -19,41 +19,17 @@
 
 package by.iba.vfapi.dao;
 
-import by.iba.vfapi.model.PodEvent;
-import org.springframework.beans.factory.InitializingBean;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.HashOperations;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Repository;
 
-import java.time.Instant;
 import java.util.Map;
 
 /**
- * PodEventRepositoryImpl class.
+ * HistoryRepositoryImpl class.
  */
 @Repository
-public class PodEventRepositoryImpl implements PodEventRepository, InitializingBean {
-    private RedisTemplate<String, Object> redisTemplate;
-    protected HashOperations<String, String, PodEvent> hashOperations;
-
-    /**
-     * Initialize hash operations after constructor.
-     */
-    @Override
-    public void afterPropertiesSet() {
-        hashOperations = redisTemplate.opsForHash();
-    }
-
-    /**
-     * Constructor for class PodEventRepositoryImpl.
-     *
-     * @param redisTemplate redisTemplate
-     */
-    @Autowired
-    public PodEventRepositoryImpl(RedisTemplate<String, Object> redisTemplate){
-        this.redisTemplate = redisTemplate;
-    }
+public class HistoryRepositoryImpl<T> implements HistoryRepository<T> {
+    protected HashOperations<String, String, T> hashOperations;
 
     /**
      * Get all items by key from Redis.
@@ -62,20 +38,19 @@ public class PodEventRepositoryImpl implements PodEventRepository, InitializingB
      * @return map of items
      */
     @Override
-    public Map<String, PodEvent> findAll(final String key) {
+    public Map<String, T> findAll(final String key) {
         return hashOperations.entries(key);
     }
 
     /**
      * Add item to Redis.
      *
-     * @param key      key
-     * @param podEvent podEvent
+     * @param key     key
+     * @param history history
      */
     @Override
-    public void add(final String key, final PodEvent podEvent) {
-        long timeStampMillis = Instant.now().toEpochMilli();
-        hashOperations.put(key, String.valueOf(timeStampMillis), podEvent);
+    public void add(final String key, final String hashKey, final T history) {
+        hashOperations.put(key, hashKey, history);
     }
 
     /**
@@ -97,7 +72,19 @@ public class PodEventRepositoryImpl implements PodEventRepository, InitializingB
      * @return item
      */
     @Override
-    public PodEvent findById(final String key, final String id) {
+    public T findById(final String key, final String id) {
         return hashOperations.get(key, id);
+    }
+
+    /**
+     * Check if hash key is already exists in Redis key.
+     *
+     * @param key key
+     * @param hashKey  hash key
+     * @return true/false
+     */
+    @Override
+    public boolean hasKey(final String key, final String hashKey) {
+        return hashOperations.hasKey(key, hashKey);
     }
 }

@@ -5,21 +5,14 @@
    file name: client-java-9.0.2.jar
    ]]></notes>
         <packageUrl regex="true">^pkg:maven/io\.kubernetes/client\-java@.*$</packageUrl>
-        <cpe>cpe:/a:kubernetes:java</cpe>
+        <cve>CVE-2020-8570</cve>
     </suppress>
     <suppress>
         <notes><![CDATA[
-   file name: client-java-9.0.2.jar
-   ]]></notes>
-        <packageUrl regex="true">^pkg:maven/io\.kubernetes/client\-java@.*$</packageUrl>
-        <cpe>cpe:/a:kubernetes:kubernetes</cpe>
-    </suppress>
-    <suppress>
-        <notes><![CDATA[
-   file name: kubernetes-model-core-5.3.0.jar
+   file name: kubernetes-model-core-5.6.0.jar
    ]]></notes>
         <packageUrl regex="true">^pkg:maven/io\.fabric8/kubernetes\-model\-core@.*$</packageUrl>
-        <cpe>cpe:/a:kubernetes:kubernetes</cpe>
+        <cve>CVE-2020-8570</cve>
     </suppress>
     <suppress>
         <notes><![CDATA[
@@ -230,6 +223,13 @@
    ]]></notes>
         <packageUrl>pkg:maven/org.springframework.security/spring-security-web@5.5.3</packageUrl>
         <cve>CVE-2022-22978</cve>
+    </suppress>
+    <suppress>
+        <notes><![CDATA[
+   file name: spring-security-web-5.5.3.jar
+   ]]></notes>
+        <packageUrl>pkg:maven/org.springframework.security/spring-security-web@5.5.3</packageUrl>
+        <cve>CVE-2022-31692</cve>
     </suppress>
     <suppress>
         <notes><![CDATA[

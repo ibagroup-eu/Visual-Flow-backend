@@ -19,11 +19,11 @@
 
 package by.iba.vfapi.dao;
 
-import by.iba.vfapi.model.PodEvent;
+import by.iba.vfapi.model.history.AbstractHistory;
 
+import by.iba.vfapi.model.history.JobHistory;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.HashOperations;
-import org.springframework.data.redis.core.RedisTemplate;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -31,7 +31,6 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -44,46 +43,45 @@ import static org.mockito.Mockito.any;
 
 @ExtendWith(MockitoExtension.class)
 @Slf4j
-class PodEventRepositoryImplTest {
-    private PodEventRepositoryImpl podEventRepository;
-    @Mock
-    private RedisTemplate<String, Object> redisTemplate;
-    private PodEvent podEvent;
+class HistoryRepositoryImplTest {
+    private HistoryRepositoryImpl historyRepository;
+    private JobHistory history;
 
     @BeforeEach
     void setUp() {
-        podEventRepository = new PodEventRepositoryImpl(redisTemplate);
-        podEventRepository.hashOperations = mock(HashOperations.class);
-        podEvent = new PodEvent("test", "test", "test", "test", "test", "test");
+        historyRepository = new HistoryRepositoryImpl();
+        historyRepository.hashOperations = mock(HashOperations.class);
+        history = new JobHistory("test", "test", "test",
+                "test", "test", "test");
     }
 
     @Test
     void testFindAll() {
-        Map<String, PodEvent> expected = new HashMap<>();
-        expected.put("test", podEvent);
-        when(podEventRepository.hashOperations.entries(anyString())).thenReturn(expected);
+        Map<String, JobHistory> expected = new HashMap<>();
+        expected.put("test", history);
+        when(historyRepository.hashOperations.entries(anyString())).thenReturn(expected);
 
-        assertEquals(expected, podEventRepository.findAll("test"), "Item must be equal to expected");
+        assertEquals(expected, historyRepository.findAll("test"), "Item must be equal to expected");
     }
 
     @Test
     void testAdd() {
-        doNothing().when(podEventRepository.hashOperations).put(anyString(), anyString(), any(PodEvent.class));
-        podEventRepository.add("test", podEvent);
-        verify(podEventRepository.hashOperations).put(anyString(), anyString(), any(PodEvent.class));
+        doNothing().when(historyRepository.hashOperations).put(anyString(), anyString(), any(AbstractHistory.class));
+        historyRepository.add("test", "test", history);
+        verify(historyRepository.hashOperations).put(anyString(), anyString(), any(AbstractHistory.class));
     }
 
     @Test
     void testDelete() {
-        when(podEventRepository.hashOperations.delete(anyString(), anyString())).thenReturn(1L);
-        podEventRepository.delete("test", "test");
-        assertEquals(1L, podEventRepository.hashOperations.delete(anyString(), anyString()), "Item must be equal to expected");
+        when(historyRepository.hashOperations.delete(anyString(), anyString())).thenReturn(1L);
+        historyRepository.delete("test", "test");
+        assertEquals(1L, historyRepository.hashOperations.delete(anyString(), anyString()), "Item must be equal to expected");
     }
 
     @Test
     void testFindById() {
-        when(podEventRepository.hashOperations.get(anyString(), anyString())).thenReturn(podEvent);
+        when(historyRepository.hashOperations.get(anyString(), anyString())).thenReturn(history);
 
-        assertEquals(podEvent, podEventRepository.findById("test", "test"), "Item must be equal to expected");
+        assertEquals(history, historyRepository.findById("test", "test"), "Item must be equal to expected");
     }
 }

@@ -19,9 +19,8 @@
 
 package by.iba.vfapi.services;
 
-import by.iba.vfapi.dao.PodEventRepositoryImpl;
+import by.iba.vfapi.dao.JobHistoryRepository;
 import by.iba.vfapi.dto.Constants;
-import by.iba.vfapi.dto.LogDto;
 import by.iba.vfapi.dto.ResourceUsageDto;
 import by.iba.vfapi.dto.history.HistoryResponseDto;
 import by.iba.vfapi.dto.jobs.JobOverviewDto;
@@ -32,8 +31,8 @@ import by.iba.vfapi.dto.jobs.PipelineJobOverviewDto;
 import by.iba.vfapi.exceptions.BadRequestException;
 import by.iba.vfapi.exceptions.ConflictException;
 import by.iba.vfapi.model.JobParams;
-import by.iba.vfapi.model.PodEvent;
 import by.iba.vfapi.model.auth.UserInfo;
+import by.iba.vfapi.model.history.JobHistory;
 import by.iba.vfapi.services.auth.AuthenticationService;
 import by.iba.vfapi.model.argo.WorkflowTemplate;
 import by.iba.vfapi.model.argo.DagTemplate;
@@ -55,7 +54,6 @@ import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceQuota;
 import io.fabric8.kubernetes.api.model.ResourceQuotaBuilder;
 import io.fabric8.kubernetes.api.model.metrics.v1beta1.PodMetricsBuilder;
-import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.ResourceNotFoundException;
 import java.io.IOException;
 import java.util.HashMap;
@@ -137,13 +135,13 @@ class JobServiceTest {
     @Mock
     private PodService podService;
     @Mock
-    private PodEventRepositoryImpl podEventRepository;
+    private JobHistoryRepository historyRepository;
     private JobService jobService;
 
     @BeforeEach
     void setUp() {
         this.jobService = new JobService("image", "master", "spark", "pullSecret", "mountPath",
-            kubernetesService, argoKubernetesService, authenticationService, podService, podEventRepository);
+            kubernetesService, argoKubernetesService, authenticationService, podService, historyRepository);
     }
 
     @Test
@@ -391,70 +389,26 @@ class JobServiceTest {
     }
 
     @Test
-    void testGetLogs() {
-        String logs =
-            "2020-09-29 11:02:23,180 [shutdown-hook-0] [/] INFO  org.apache.spark.SparkContext - Invoking stop()" +
-                " from shutdown hook\n" +
-                "AND SOMETHING ELSE\n" +
-                "2020-09-29 11:02:23,197 [shutdown-hook-0] [/] INFO  o.s.jetty.server.AbstractConnector - Stopped";
-
-        when(kubernetesService.getParsedPodLogs("projectId", "id")).thenCallRealMethod();
-        when(kubernetesService.getPodLogs("projectId", "id")).thenReturn(logs);
-
-        List<LogDto> logsObjects = jobService.getJobLogs("projectId", "id");
-        LogDto expected = LogDto
-            .builder()
-            .message("org.apache.spark.SparkContext - Invoking stop() from shutdown hook\nAND SOMETHING ELSE")
-            .level("INFO")
-            .timestamp("2020-09-29 11:02:23,180")
-            .build();
-
-        assertEquals(2, logsObjects.size(), "Size must be equals to 2");
-        assertEquals(expected, logsObjects.get(0), "Logs must be equal to expected");
-    }
-
-    @Test
     void testGetHistory() {
-        Map<String, PodEvent> events = new HashMap<>();
-        events.put("1661334380617",
-                new PodEvent("3b6d29b1-f717-4532-8fb6-68b339932253","job", "2022-08-24T09:45:09Z",
+        Map<String, JobHistory> histories = new HashMap<>();
+        histories.put("1661334380617",
+                new JobHistory("3b6d29b1-f717-4532-8fb6-68b339932253","job", "2022-08-24T09:45:09Z",
                         "2022-08-24T09:46:19Z","jane-doe" ,"Succeeded"));
-        when(podEventRepository.findAll(anyString())).thenReturn(events);
+        when(historyRepository.findAll(anyString())).thenReturn(histories);
 
         List<HistoryResponseDto> historyObjects = jobService.getJobHistory("projectId", "id");
         HistoryResponseDto expected = HistoryResponseDto
                 .builder()
                 .id("3b6d29b1-f717-4532-8fb6-68b339932253")
-                .flag("job")
+                .type("job")
                 .status("Succeeded")
                 .startedAt("2022-08-24T09:45:09Z")
                 .finishedAt("2022-08-24T09:46:19Z")
                 .startedBy("jane-doe")
+                .logId("1661334380617")
                 .build();
 
         assertEquals(expected, historyObjects.get(0), "History must be equal to expected");
-    }
-
-    @Test
-    void testGetLogsNotFound() {
-        when(kubernetesService.getParsedPodLogs("projectId", "id")).thenCallRealMethod();
-        when(kubernetesService.getPodLogs("projectId", "id")).thenThrow(ResourceNotFoundException.class);
-
-        List<LogDto> logsObjects = jobService.getJobLogs("projectId", "id");
-
-        assertEquals(0, logsObjects.size(), "Size must be equals to expected");
-    }
-
-    @Test
-    void testGetLogsFailure() {
-        when(kubernetesService.getParsedPodLogs("projectId", "id")).thenCallRealMethod();
-        when(kubernetesService.getPodLogs("projectId", "id")).thenThrow(new KubernetesClientException("Not found",
-                                                                                                      500,
-                                                                                                      null));
-
-        assertThrows(KubernetesClientException.class,
-                     () -> jobService.getJobLogs("projectId", "id"),
-                     "Expected exception must be thrown");
     }
 
     @Test

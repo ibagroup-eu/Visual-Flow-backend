@@ -19,10 +19,9 @@
 
 package by.iba.vfapi.services;
 
-import by.iba.vfapi.dao.PodEventRepositoryImpl;
+import by.iba.vfapi.dao.JobHistoryRepository;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.dto.GraphDto;
-import by.iba.vfapi.dto.LogDto;
 import by.iba.vfapi.dto.ResourceUsageDto;
 import by.iba.vfapi.dto.history.HistoryResponseDto;
 import by.iba.vfapi.dto.jobs.JobOverviewDto;
@@ -34,7 +33,7 @@ import by.iba.vfapi.dto.projects.ParamsDto;
 import by.iba.vfapi.exceptions.BadRequestException;
 import by.iba.vfapi.exceptions.ConflictException;
 import by.iba.vfapi.exceptions.InternalProcessingException;
-import by.iba.vfapi.model.PodEvent;
+import by.iba.vfapi.model.history.JobHistory;
 import by.iba.vfapi.services.auth.AuthenticationService;
 import by.iba.vfapi.model.argo.Parameter;
 import by.iba.vfapi.model.argo.WorkflowTemplate;
@@ -86,7 +85,7 @@ public class JobService {
     private final ArgoKubernetesService argoKubernetesService;
     private final AuthenticationService authenticationService;
     private final PodService podService;
-    private final PodEventRepositoryImpl podEventRepository;
+    private final JobHistoryRepository historyRepository;
 
     // Note that this constructor has the following sonar error: java:S107 - Methods should not have too many
     // parameters. This error has been added to ignore list due to the current inability to solve this problem.
@@ -100,7 +99,7 @@ public class JobService {
         ArgoKubernetesService argoKubernetesService,
         final AuthenticationService authenticationService,
         final PodService podService,
-        PodEventRepositoryImpl podEventRepository) {
+        final JobHistoryRepository historyRepository) {
         this.jobImage = jobImage;
         this.jobMaster = jobMaster;
         this.serviceAccount = serviceAccount;
@@ -110,7 +109,7 @@ public class JobService {
         this.argoKubernetesService = argoKubernetesService;
         this.authenticationService = authenticationService;
         this.podService = podService;
-        this.podEventRepository = podEventRepository;
+        this.historyRepository = historyRepository;
     }
 
     /**
@@ -368,7 +367,6 @@ public class JobService {
         } catch (ResourceNotFoundException e) {
             LOGGER.info(KubernetesService.NO_POD_MESSAGE, e);
         }
-
         podService.trackPodEvents(projectId, jobId);
         kubernetesService.createPod(projectId, pod);
     }
@@ -391,17 +389,6 @@ public class JobService {
     }
 
     /**
-     * Retrieve job logs
-     *
-     * @param projectId project id
-     * @param id        job id
-     * @return list of log entries
-     */
-    public List<LogDto> getJobLogs(String projectId, String id) {
-        return kubernetesService.getParsedPodLogs(projectId, id);
-    }
-
-    /**
      * Retrieve job history
      *
      * @param projectId project id
@@ -409,22 +396,23 @@ public class JobService {
      * @return list of history
      */
     public List<HistoryResponseDto> getJobHistory(String projectId, String id) {
+        Map<String, JobHistory> histories = historyRepository.findAll(projectId + "_" + id);
 
-        Map<String, PodEvent> events = podEventRepository.findAll(projectId + "_" + id);
-
-        return events
-                .values()
-                .stream()
-                .map(podEvent -> HistoryResponseDto
-                        .builder()
-                        .id(podEvent.getId())
-                        .flag(podEvent.getFlag())
-                        .status(podEvent.getStatus())
-                        .startedAt(podEvent.getStartedAt())
-                        .finishedAt(podEvent.getFinishedAt())
-                        .startedBy(podEvent.getStartedBy())
-                        .build())
-                .collect(Collectors.toList());
+        return histories
+            .entrySet()
+            .stream()
+            .map(jobHistory -> HistoryResponseDto
+                .builder()
+                .id(jobHistory.getValue().getId())
+                .type(jobHistory.getValue().getType())
+                .status(jobHistory.getValue().getStatus())
+                .startedAt(jobHistory.getValue().getStartedAt())
+                .finishedAt(jobHistory.getValue().getFinishedAt())
+                .startedBy(jobHistory.getValue().getStartedBy())
+                .logId(jobHistory.getKey())
+                .build()
+            )
+            .collect(Collectors.toList());
     }
 
     /**

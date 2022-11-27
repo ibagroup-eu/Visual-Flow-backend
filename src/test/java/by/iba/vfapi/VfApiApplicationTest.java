@@ -18,19 +18,22 @@
  */
 package by.iba.vfapi;
 
+import by.iba.vfapi.controllers.DatabasesController;
 import by.iba.vfapi.controllers.JobController;
 import by.iba.vfapi.controllers.PipelineController;
 import by.iba.vfapi.controllers.ProjectController;
-import by.iba.vfapi.controllers.TransferController;
 import by.iba.vfapi.controllers.UserController;
+import by.iba.vfapi.controllers.TransferController;
 import by.iba.vfapi.services.ArgoKubernetesService;
 import by.iba.vfapi.services.JobService;
 import by.iba.vfapi.services.KubernetesService;
+import by.iba.vfapi.services.LogService;
 import by.iba.vfapi.services.PipelineService;
 import by.iba.vfapi.services.PodService;
 import by.iba.vfapi.services.ProjectService;
 import by.iba.vfapi.services.TransferService;
 import by.iba.vfapi.services.UserService;
+import by.iba.vfapi.services.WorkflowService;
 import by.iba.vfapi.services.auth.AuthenticationService;
 import by.iba.vfapi.services.auth.OAuthService;
 import io.fabric8.kubernetes.api.model.apiextensions.v1beta1.CustomResourceDefinition;
@@ -82,6 +85,12 @@ class VfApiApplicationTest {
     private PipelineService pipelineService;
     @Autowired
     private PodService podService;
+    @Autowired
+    private WorkflowService workflowService;
+    @Autowired
+    private DatabasesController databasesController;
+    @Autowired
+    private LogService logService;
 
     {
         K8S_SERVER.init();
@@ -129,5 +138,8 @@ class VfApiApplicationTest {
         assertNotNull(argoKubernetesService);
         assertNotNull(pipelineService);
         assertNotNull(podService);
+        assertNotNull(workflowService);
+        assertNotNull(databasesController);
+        assertNotNull(logService);
     }
 }

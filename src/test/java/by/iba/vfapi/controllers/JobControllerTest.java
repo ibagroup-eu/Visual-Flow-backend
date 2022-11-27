@@ -156,7 +156,7 @@ class JobControllerTest {
         List<HistoryResponseDto> dtoList = List.of(HistoryResponseDto
                 .builder()
                 .id("3b6d29b1-f717-4532-8fb6-68b339932253")
-                .flag("job")
+                .type("job")
                 .status("Succeeded")
                 .startedAt("2022-08-24T09:45:09Z")
                 .finishedAt("2022-08-24T09:46:19Z")

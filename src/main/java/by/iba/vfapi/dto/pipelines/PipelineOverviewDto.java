@@ -61,6 +61,8 @@ public class PipelineOverviewDto {
     private boolean runnable;
     @Schema(description = "Pipeline's list of tags")
     private List<String> tags;
+    @Schema(description = "Pipeline's list of dependencies")
+    private List<String> dependentPipelineIds;
     @Schema(ref = OpenApiConfig.SCHEMA_PIPELINE_STAGE_STATUSES)
     private Map<String, String> jobsStatuses;
 
@@ -194,6 +196,19 @@ public class PipelineOverviewDto {
     public PipelineOverviewDto tags(Collection<String> tags) {
         if (tags != null) {
             this.tags = new ArrayList<>(tags);
+        }
+        return this;
+    }
+
+    /**
+     * Setter for dependentPipelineIds.
+     *
+     * @param  dependentPipelineIds dependentPipelineIds
+     * @return this
+     */
+    public PipelineOverviewDto dependentPipelineIds(Collection<String> dependentPipelineIds) {
+        if (dependentPipelineIds != null) {
+            this.dependentPipelineIds = new ArrayList<>(dependentPipelineIds);
         }
         return this;
     }

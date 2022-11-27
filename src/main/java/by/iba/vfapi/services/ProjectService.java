@@ -19,6 +19,7 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.common.LoadFilePodBuilder;
 import by.iba.vfapi.config.CustomNamespaceAnnotationsConfig;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.dto.ResourceUsageDto;
@@ -40,8 +41,6 @@ import io.fabric8.kubernetes.api.model.ResourceQuota;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaimBuilder;
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
-import io.fabric8.kubernetes.api.model.PodBuilder;
-import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.api.model.ServiceAccountBuilder;
@@ -50,13 +49,17 @@ import io.fabric8.kubernetes.api.model.rbac.RoleBindingBuilder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.HashMap;
 import java.util.Objects;
 import java.util.stream.Collectors;
+import java.util.Locale;
 import javax.validation.Valid;
+import io.fabric8.kubernetes.client.KubernetesClientException;
+import io.fabric8.kubernetes.client.ResourceNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import static by.iba.vfapi.dto.Constants.SECRETS;
 
@@ -148,7 +151,11 @@ public class ProjectService {
                                                 .endMetadata()
                                                 .build());
         kubernetesService.createPVC(id, initializePVC());
-        kubernetesService.createPod(id, initializePod(id, getBufferPVCPodParams()));
+        kubernetesService.createPod(id, LoadFilePodBuilder.getLoadFilePod(
+                                            id,
+                                            LoadFilePodBuilder.getBufferPVCPodParams(),
+                                            pvcMountPath,
+                                            imagePullSecret));
         LOGGER.info("Project {} successfully created", id);
         return id;
     }
@@ -303,7 +310,13 @@ public class ProjectService {
      * @return project connection.
      */
     public ConnectDto getConnection(final String id, final String name) {
-        Secret secret = kubernetesService.getSecret(id, ConnectionsDto.SECRET_NAME);
+        Secret secret;
+        try {
+            secret = kubernetesService.getSecret(id, ConnectionsDto.SECRET_NAME);
+        } catch (KubernetesClientException | ResourceNotFoundException e) {
+            LOGGER.error("An error occurred during getting project info: {}", e.getLocalizedMessage());
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,"The project has not been found!");
+        }
         boolean editable = kubernetesService.isAccessible(secret.getMetadata().getNamespace(),
                 SECRETS,
                 "",
@@ -455,7 +468,8 @@ public class ProjectService {
         List<RoleBinding> grantsToRevoke = oldGrants
             .stream()
             .filter((RoleBinding rb) -> !newGrantNames.contains(rb.getMetadata().getName()) &&
-                !rb.getMetadata().getName().toLowerCase().contains(user.toLowerCase()))
+                !rb.getMetadata().getName().toLowerCase(Locale.getDefault())
+                        .contains(user.toLowerCase(Locale.getDefault())))
             .collect(Collectors.toList());
         kubernetesService.deleteRoleBindings(id, grantsToRevoke);
 
@@ -465,7 +479,8 @@ public class ProjectService {
         List<RoleBinding> grantsToApply = newGrants
             .stream()
             .filter((RoleBinding rb) -> !oldGrantNames.contains(rb.getMetadata().getName()) &&
-                !rb.getMetadata().getName().toLowerCase().contains(user.toLowerCase()))
+                !rb.getMetadata().getName().toLowerCase(Locale.getDefault())
+                        .contains(user.toLowerCase(Locale.getDefault())))
             .collect(Collectors.toList());
         kubernetesService.createRoleBindings(id, grantsToApply);
     }
@@ -486,48 +501,6 @@ public class ProjectService {
     }
 
     /**
-     * Initialize Pod for mounting to PVC.
-     *
-     * @param id project id.
-     * @return pod.
-     */
-    private Pod initializePod(String id, Map<String, String> params) {
-        return new PodBuilder()
-                .withNewMetadata()
-                .withName(K8sUtils.PVC_POD_NAME)
-                .withNamespace(id)
-                .endMetadata()
-                .withNewSpec()
-                .addNewContainer()
-                .withName(K8sUtils.PVC_POD_NAME)
-                .withResources(K8sUtils.getResourceRequirements(params))
-                .withCommand(
-                        "/bin/sh",
-                        "-c",
-                        "while true; " +
-                        "do echo Running buffer container for uploading/downloading files; " +
-                        "sleep 100;done"
-                )
-                .withImage(K8sUtils.PVC_POD_IMAGE)
-                .withImagePullPolicy("IfNotPresent")
-                .addNewVolumeMount()
-                .withName(K8sUtils.PVC_VOLUME_NAME)
-                .withMountPath(pvcMountPath)
-                .endVolumeMount()
-                .endContainer()
-                .addNewVolume()
-                .withName(K8sUtils.PVC_VOLUME_NAME)
-                .withNewPersistentVolumeClaim()
-                .withClaimName(K8sUtils.PVC_NAME)
-                .endPersistentVolumeClaim()
-                .endVolume()
-                .addNewImagePullSecret(imagePullSecret)
-                .withRestartPolicy("Never")
-                .endSpec()
-                .build();
-    }
-
-    /**
      * Initialize PVC for storing files.
      *
      * @return persistentVolumeClaim.
@@ -544,16 +517,4 @@ public class ProjectService {
                 .build();
     }
 
-    /**
-     * Get request/limits params for Pod to upload/download files.
-     *
-     * @return resource parameters.
-     */
-    private Map<String, String> getBufferPVCPodParams() {
-        Map<String, String> params = new HashMap<>();
-        params.put(Constants.DRIVER_CORES, "300m");
-        params.put(Constants.DRIVER_MEMORY, "300Mi");
-        params.put(Constants.DRIVER_REQUEST_CORES, "100m");
-        return params;
-    }
 }

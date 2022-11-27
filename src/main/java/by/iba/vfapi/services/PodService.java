@@ -19,9 +19,10 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.dao.JobHistoryRepository;
+import by.iba.vfapi.dao.LogRepositoryImpl;
 import io.fabric8.kubernetes.client.Watch;
 import lombok.SneakyThrows;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -30,18 +31,24 @@ import java.util.concurrent.CountDownLatch;
 /**
  * PodService class.
  */
-@Slf4j
 @Service
 public class PodService {
     private final KubernetesService kubernetesService;
+    private final JobHistoryRepository historyRepository;
+    private final LogRepositoryImpl logRepository;
 
     /**
      * Constructor for class PodService.
      *
      * @param kubernetesService kubernetesService
      */
-    public PodService(KubernetesService kubernetesService) {
+    public PodService(
+            final KubernetesService kubernetesService,
+            final JobHistoryRepository historyRepository,
+            final LogRepositoryImpl logRepository) {
         this.kubernetesService = kubernetesService;
+        this.historyRepository = historyRepository;
+        this.logRepository = logRepository;
     }
 
     /**
@@ -54,7 +61,7 @@ public class PodService {
     @SneakyThrows
     public void trackPodEvents(final String projectId, final String jobId) {
         CountDownLatch latch = new CountDownLatch(1);
-        Watch watch = kubernetesService.watchPod(projectId, jobId, latch);
+        Watch watch = kubernetesService.watchPod(projectId, jobId, historyRepository, logRepository,latch);
         latch.await();
         watch.close();
     }

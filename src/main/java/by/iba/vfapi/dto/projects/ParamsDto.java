@@ -19,6 +19,9 @@
 
 package by.iba.vfapi.dto.projects;
 
+import by.iba.vfapi.exceptions.BadRequestException;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -33,20 +36,16 @@ import java.util.stream.Collectors;
 import javax.validation.Valid;
 import javax.validation.constraints.NotNull;
 import lombok.Builder;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.Setter;
-import lombok.ToString;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import org.apache.commons.codec.binary.Base64;
 
 /**
  * Params DTO class.
  */
-@Getter
-@Setter
+@Data
+@NoArgsConstructor
 @Builder(toBuilder = true)
-@EqualsAndHashCode
-@ToString
 @Schema(description = "DTO with list of project params")
 public class ParamsDto {
     public static final String SECRET_NAME = "secret";
@@ -68,27 +67,46 @@ public class ParamsDto {
         List<ParamDto> params = secretData
             .entrySet()
             .stream()
-            .map(entry -> ParamDto
-                .builder()
-                .key(entry.getKey())
-                .value(new String(Base64.decodeBase64(entry.getValue()), StandardCharsets.UTF_8))
-                .secret(Boolean.valueOf(secret.getMetadata().getAnnotations().get(entry.getKey())))
-                .build())
+            .map((Map.Entry<String, String> entry) -> {
+                try {
+                    String body = new String(Base64.decodeBase64(entry.getValue()),
+                            StandardCharsets.UTF_8);
+                    if(!body.startsWith("{\"text\":")) {
+                        body = String.format(
+                                "{\"text\": \"%s\", \"conUsages\": [], \"jobUsages\": [], \"pipUsages\": []}", body);
+                    }
+                    return ParamDto
+                            .builder()
+                            .key(entry.getKey())
+                            .value(new ObjectMapper().readValue(body, ParamDataDto.class))
+                            .secret(Boolean.parseBoolean(secret.getMetadata().getAnnotations().get(entry.getKey())))
+                            .build();
+                } catch (JsonProcessingException e) {
+                    throw new BadRequestException("Json Processing Exception", e);
+                }
+            })
             .collect(Collectors.toList());
         return ParamsDto.builder().params(params);
     }
 
     public SecretBuilder toSecret() {
-        Map<String, String> annotations = Optional
-            .ofNullable(params)
-            .orElseGet(Collections::emptyList)
-            .stream()
-            .collect(Collectors.toMap(ParamDto::getKey, (ParamDto param) -> param.getSecret().toString()));
+        ObjectMapper mapper = new ObjectMapper();
         Map<String, String> data = Optional
             .ofNullable(params)
             .orElseGet(Collections::emptyList)
             .stream()
-            .collect(Collectors.toMap(ParamDto::getKey, (ParamDto param) -> param.getValue().trim()));
+            .collect(Collectors.toMap(ParamDto::getKey, (ParamDto param) -> {
+                try {
+                    return mapper.writeValueAsString(param.getValue());
+                } catch (JsonProcessingException e) {
+                    throw new BadRequestException("Json Processing Exception", e);
+                }
+            }));
+        Map<String, String> annotations = Optional
+                .ofNullable(params)
+                .orElseGet(Collections::emptyList)
+                .stream()
+                .collect(Collectors.toMap(ParamDto::getKey, (ParamDto param) -> String.valueOf(param.isSecret())));
         return new SecretBuilder()
             .addToStringData(data)
             .withNewMetadata()

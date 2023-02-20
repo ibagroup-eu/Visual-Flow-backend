@@ -34,6 +34,7 @@ public final class Constants {
     public static final int MAX_DESCRIPTION_LENGTH = 500;
     public static final String PARAM_KEY_PATTERN = "[A-Za-z0-9\\-_]{1,50}";
     public static final String CONNECTION_KEY_PATTERN = "[A-Za-z0-9\\-_]{1,50}";
+    public static final String CONNECTION_NAME = "connectionName";
     public static final String JOB_CONFIG_FIELD = "JOB_CONFIG";
     public static final String NAME = "name";
     public static final String TYPE = "type";
@@ -46,6 +47,7 @@ public final class Constants {
     public static final String NAME_FIELD = "projectName";
 
     public static final String JOB_ID_LABEL = "jobId";
+    public static final String DEPENDENT_JOB_IDS = "dependentJobIDs";
     public static final String SPARK_ROLE_LABEL = "spark-role";
     public static final String SPARK_ROLE_EXEC = "executor";
     public static final String WORKFLOW_POD_LABEL = "workflows.argoproj.io/workflow";
@@ -67,6 +69,7 @@ public final class Constants {
     public static final String EXECUTOR_REQUEST_CORES = "EXECUTOR_REQUEST_CORES";
     public static final String SHUFFLE_PARTITIONS = "SHUFFLE_PARTITIONS";
     public static final String TAGS = "TAGS";
+    public static final String DEPENDENT_PIPELINE_IDS = "DEPENDENT_PIPELINE_IDS";
     public static final String CPU_FIELD = "cpu";
     public static final String MEMORY_FIELD = "memory";
     public static final String DRIVER_CORES = "DRIVER_CORES";

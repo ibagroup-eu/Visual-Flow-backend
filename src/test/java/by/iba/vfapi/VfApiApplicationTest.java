@@ -25,6 +25,7 @@ import by.iba.vfapi.controllers.ProjectController;
 import by.iba.vfapi.controllers.UserController;
 import by.iba.vfapi.controllers.TransferController;
 import by.iba.vfapi.services.ArgoKubernetesService;
+import by.iba.vfapi.services.DependencyHandlerService;
 import by.iba.vfapi.services.JobService;
 import by.iba.vfapi.services.KubernetesService;
 import by.iba.vfapi.services.LogService;
@@ -91,6 +92,8 @@ class VfApiApplicationTest {
     private DatabasesController databasesController;
     @Autowired
     private LogService logService;
+    @Autowired
+    private DependencyHandlerService dependencyHandlerService;
 
     {
         K8S_SERVER.init();
@@ -141,5 +144,6 @@ class VfApiApplicationTest {
         assertNotNull(workflowService);
         assertNotNull(databasesController);
         assertNotNull(logService);
+        assertNotNull(dependencyHandlerService);
     }
 }

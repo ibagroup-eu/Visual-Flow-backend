@@ -1,6 +1,7 @@
 package by.iba.vfapi.services;
 
 import by.iba.vfapi.dto.projects.ConnectDto;
+import by.iba.vfapi.dto.projects.ParamDataDto;
 import by.iba.vfapi.dto.projects.ParamDto;
 import by.iba.vfapi.dto.projects.ParamsDto;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,7 +36,9 @@ public class DatabasesServiceTest {
         String projectId = "test";
         String connectionName = "con";
         String conStrRepresentation = "{\"db\":\"#db#\"}";
-        ParamDto paramDto = ParamDto.builder().key("db").value("value").secret(false).build();
+        ParamDto paramDto = ParamDto.builder().key("db").value(ParamDataDto.builder()
+                        .text("value")
+                        .build()).secret(false).build();
         ParamsDto mockParam = mock(ParamsDto.class);
         when(projectService.getParams(projectId)).thenReturn(mockParam);
         when(mockParam.getParams()).thenReturn(List.of(paramDto));

@@ -417,6 +417,21 @@ public class PipelineController {
     }
 
     /**
+     * Method for recalculating all params using in all pipelines. It may take some time to make a full
+     * recalculation.
+     * @param id is a project id.
+     * @return true, if recalculation completed successfully.
+     */
+    @PostMapping("/{id}/recalc/pips")
+    public boolean recalculateParamsPipUsages(@PathVariable final String id) {
+        LOGGER.info(
+                "{} - Recalculation params pipelines usages for the project '{}'",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
+        return pipelineService.recalculateParamsPipelineUsages(id);
+    }
+
+    /**
      * Getting pipeline history.
      *
      * @param projectId  project id

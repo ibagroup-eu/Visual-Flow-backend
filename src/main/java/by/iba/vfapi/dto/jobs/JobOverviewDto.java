@@ -29,11 +29,14 @@ import java.util.Map;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
+
+import static by.iba.vfapi.services.DependencyHandlerService.checkIfJobDependsExist;
 
 /**
  * job overview DTO class.
@@ -63,6 +66,7 @@ public class JobOverviewDto {
     @Schema(description = "Whether current user can run the job and whether the job has some stages in it")
     private final boolean runnable;
     private final List<String> tags;
+    private final Set<String> dependentPipelineIds;
 
     public static JobOverviewDto.JobOverviewDtoBuilder fromConfigMap(ConfigMap configMap) {
         return JobOverviewDto
@@ -70,6 +74,7 @@ public class JobOverviewDto {
             .id(configMap.getMetadata().getName())
             .name(configMap.getMetadata().getLabels().get(Constants.NAME))
             .tags(checkIfTagsExist(configMap.getData()))
+            .dependentPipelineIds(checkIfJobDependsExist(configMap.getData()))
             .lastModified(configMap.getMetadata().getAnnotations().get(Constants.LAST_MODIFIED));
     }
 
@@ -91,6 +96,7 @@ public class JobOverviewDto {
                                 .pipelineId(pipelineJob.getPipelineId())
                                 .usage(pipelineJob.getUsage())
                                 .tags(job.getTags())
+                                .dependentPipelineIds(job.getDependentPipelineIds())
                                 .build())
                             .collect(Collectors.toList()));
         }

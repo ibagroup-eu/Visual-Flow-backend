@@ -128,7 +128,8 @@ public class JobRequestDto {
                 "WITH_COLUMN".equals(operation) ||
                 "PIVOT".equals(operation) ||
                 "DATETIME".equals(operation) ||
-                "STRING".equals(operation)) && targetsCount != 1) {
+                "STRING".equals(operation) ||
+                "HANDLE_NULL".equals(operation)) && targetsCount != 1) {
                 throw new BadRequestException(String.format("%s stage must have one input arrows", operation));
             } else if (!List.of("READ",
                                 "WRITE",
@@ -146,7 +147,8 @@ public class JobRequestDto {
                                 "VALIDATE",
                                 "PIVOT",
                                 "DATETIME",
-                                "STRING").contains(operation)) {
+                                "STRING",
+                                "HANDLE_NULL").contains(operation)) {
                 throw new BadRequestException("Invalid stage type");
             }
         }

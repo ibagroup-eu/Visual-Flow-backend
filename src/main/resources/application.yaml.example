@@ -88,6 +88,8 @@ namespace:
 pvc:
   memory: 1Gi                                     # amount of memory for PVC
   mountPath: /files                               # PVC mount path to upload/download files
+  accessModes: ReadWriteMany, ReadWriteOnce, ReadOnlyMany, ReadWriteOncePod  # PVC access modes, separated by comma. One or more elements can be declared inside this param, but remember,
+                                                  # that all declared modes will be passed into PVC initialization for storing files when creating new projects.
 job:
   imagePullSecret:                                # secret in kubernetes to pull jobs images (required). Backend copies this secret to each new namespace(app project)
   spark:

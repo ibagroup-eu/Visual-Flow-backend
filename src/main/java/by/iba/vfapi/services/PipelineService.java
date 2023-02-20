@@ -78,13 +78,7 @@ import io.argoproj.workflow.models.WorkflowRetryRequest;
 import io.argoproj.workflow.models.WorkflowStopRequest;
 import io.argoproj.workflow.models.WorkflowSuspendRequest;
 import io.argoproj.workflow.models.WorkflowTerminateRequest;
-import io.fabric8.kubernetes.api.model.ObjectMeta;
-import io.fabric8.kubernetes.api.model.HasMetadata;
-import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
-import io.fabric8.kubernetes.api.model.Quantity;
-import io.fabric8.kubernetes.api.model.ResourceQuota;
-import io.fabric8.kubernetes.api.model.ResourceRequirements;
-import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
+import io.fabric8.kubernetes.api.model.*;
 import io.fabric8.kubernetes.client.ResourceNotFoundException;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -113,7 +107,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.text.StringEscapeUtils;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.json.JsonParseException;
 import org.springframework.stereotype.Service;
 
 import static by.iba.vfapi.dto.Constants.CONTAINER_NODE_ID;
@@ -144,15 +137,15 @@ public class PipelineService {
     public static final String IMAGE_LINK = "imageLink";
     public static final String IMAGE_PULL_POLICY = "imagePullPolicy";
     public static final String COMMAND = "command";
-    static final String SPARK_TEMPLATE_NAME = "sparkTemplate";
-    static final String NOTIFICATION_TEMPLATE_NAME = "notificationTemplate";
-    static final String PIPELINE_TEMPLATE_NAME = "pipelineTemplate";
-    static final String PIPELINE_ID = "pipelineId";
-    static final String CONTAINER_WITH_CMD_TEMPLATE_NAME = "containerTemplateWithCmd";
-    static final String CONTAINER_WITH_CMD_AND_PROJECT_PARAMS_TEMPLATE_NAME =
+    public static final String SPARK_TEMPLATE_NAME = "sparkTemplate";
+    public static final String NOTIFICATION_TEMPLATE_NAME = "notificationTemplate";
+    public static final String PIPELINE_TEMPLATE_NAME = "pipelineTemplate";
+    public static final String PIPELINE_ID = "pipelineId";
+    public static final String CONTAINER_WITH_CMD_TEMPLATE_NAME = "containerTemplateWithCmd";
+    public static final String CONTAINER_WITH_CMD_AND_PROJECT_PARAMS_TEMPLATE_NAME =
         "containerTemplateWithCmdAndProjectParams";
-    static final String CONTAINER_TEMPLATE_NAME = "containerTemplate";
-    static final String CONTAINER_TEMPLATE_WITH_PROJECT_PARAMS_NAME = "containerTemplateWithProjectParams";
+    public static final String CONTAINER_TEMPLATE_NAME = "containerTemplate";
+    public static final String CONTAINER_TEMPLATE_WITH_PROJECT_PARAMS_NAME = "containerTemplateWithProjectParams";
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final int DEPENDS_OPERATOR_LENGTH = 4;
     private static final String GRAPH_ID = "graphId";
@@ -169,6 +162,7 @@ public class PipelineService {
     private final String pvcMountPath;
     private final WorkflowService workflowService;
     private final AuthenticationService authenticationService;
+    private final DependencyHandlerService dependencyHandlerService;
     private final PipelineHistoryRepository<? extends AbstractHistory> pipelineHistoryRepository;
     @Value("${job.slack.apiToken}")
     private String slackApiToken;
@@ -185,6 +179,7 @@ public class PipelineService {
         WorkflowServiceApi apiInstance,
         final WorkflowService workflowService,
         final AuthenticationService authenticationService,
+        final DependencyHandlerService dependencyHandlerService,
         final PipelineHistoryRepository<? extends AbstractHistory> pipelineHistoryRepository) {
         this.sparkImage = sparkImage;
         this.jobMaster = jobMaster;
@@ -197,6 +192,7 @@ public class PipelineService {
         this.pvcMountPath = pvcMountPath;
         this.workflowService = workflowService;
         this.authenticationService = authenticationService;
+        this.dependencyHandlerService = dependencyHandlerService;
         this.pipelineHistoryRepository = pipelineHistoryRepository;
     }
 
@@ -1169,7 +1165,18 @@ public class PipelineService {
         WorkflowTemplate workflowTemplate = createWorkflowTemplate(projectId, id, name, definition, params);
         addParametersToDagTasks(workflowTemplate, projectId);
         argoKubernetesService.createOrReplaceWorkflowTemplate(projectId, workflowTemplate);
-        checkPipelineDependencies(projectId, id, null, definition);
+        dependencyHandlerService.addDependencies(projectId, id,
+                dependencyHandlerService.getNodesByDefinition(
+                        dependencyHandlerService.getDefinition(workflowTemplate)));
+        List<String> foundParams = ProjectService.findParamsKeysInString(definition.toString());
+        if(!foundParams.isEmpty()) {
+            List<ParamDto> existingParams = projectService.getParams(projectId).getParams();
+            existingParams
+                    .stream()
+                    .filter(param -> foundParams.contains(param.getKey()))
+                    .forEach(param -> param.getValue().getPipUsages().add(id));
+            projectService.updateParamsWithoutProcessing(projectId, existingParams);
+        }
         return id;
     }
 
@@ -1370,14 +1377,13 @@ public class PipelineService {
      */
     public void update(final String projectId, final String id, final JsonNode definition,
                        final PipelineParams params, final String name) {
+        checkPipelineName(projectId, id, name);
         try {
-            WorkflowTemplate oldWorkflowTemplate = argoKubernetesService.getWorkflowTemplate(projectId, id);
-            checkPipelineDependencies(projectId, id, getDefinition(oldWorkflowTemplate), definition);
+            dependencyHandlerService.updateDependenciesGraphPipeline(projectId, id, definition);
         } catch (ResourceNotFoundException e) {
             LOGGER.warn("Cannot find workflow template for {} pipeline", id);
             throw new BadRequestException(String.format("Pipeline with id %s doesn't exist", id), e);
         }
-        checkPipelineName(projectId, id, name);
         try {
             argoKubernetesService.deleteWorkflow(projectId, id);
         } catch (ResourceNotFoundException e) {
@@ -1388,32 +1394,69 @@ public class PipelineService {
         WorkflowTemplate newWorkflowTemplate = createWorkflowTemplate(projectId, id, name, definition, params);
         addParametersToDagTasks(newWorkflowTemplate, projectId);
         argoKubernetesService.createOrReplaceWorkflowTemplate(projectId, newWorkflowTemplate);
+
+        List<String> foundParams = ProjectService.findParamsKeysInString(definition.toString());
+        List<ParamDto> existingParams = projectService.getParams(projectId).getParams();
+        for(ParamDto param : existingParams) {
+            if(foundParams.contains(param.getKey())) {
+                param.getValue().getPipUsages().add(id);
+            } else {
+                param.getValue().getPipUsages().remove(id);
+            }
+        }
+        projectService.updateParamsWithoutProcessing(projectId, existingParams);
     }
 
     /**
      * Delete workflow template.
      *
-     * @param projectId project id
-     * @param id        pipeline id
+     * @param projectId  project id
+     * @param pipelineId pipeline id
      */
-    public void delete(String projectId, String id) {
-        WorkflowTemplate workflowTemplate = argoKubernetesService.getWorkflowTemplate(projectId, id);
-
-        if (workflowTemplate.getSpec().getPipelineParams().getDependentPipelineIds() != null &&
-                !workflowTemplate.getSpec().getPipelineParams().getDependentPipelineIds().isEmpty()) {
-            throw new BadRequestException("The pipeline cannot be removed. There are dependencies.");
-        } else {
-
-            checkPipelineDependencies(projectId, id, getDefinition(workflowTemplate), null);
-
-            argoKubernetesService.deleteWorkflowTemplate(projectId, id);
-            argoKubernetesService.deleteWorkflow(projectId, id);
+    public void delete(String projectId, String pipelineId) {
+        WorkflowTemplate workflowTemplate = argoKubernetesService.getWorkflowTemplate(projectId, pipelineId);
+        if (dependencyHandlerService.pipelineHasDepends(workflowTemplate)) {
+            dependencyHandlerService.deleteDependencies(projectId, pipelineId,
+                    dependencyHandlerService.getNodesByDefinition(
+                            dependencyHandlerService.getDefinition(workflowTemplate)));
+            argoKubernetesService.deleteWorkflowTemplate(projectId, pipelineId);
+            argoKubernetesService.deleteWorkflow(projectId, pipelineId);
             argoKubernetesService.deleteSecretsByLabels(projectId,
                     new HashMap<>(Map.of(Constants.PIPELINE_ID_LABEL,
-                            id,
+                            pipelineId,
                             Constants.CONTAINER_STAGE,
                             "true")));
+
+            List<ParamDto> existingParams = projectService.getParams(projectId).getParams();
+            existingParams.forEach(param -> param.getValue().getPipUsages().remove(pipelineId));
+            projectService.updateParamsWithoutProcessing(projectId, existingParams);
+        } else {
+            throw new BadRequestException("The pipeline cannot be removed. There are dependencies.");
         }
+    }
+
+    /**
+     * Method for recalculation all params usages in all pipelines.
+     *
+     * @param projectId is a project id.
+     * @return true, if there were not any errors during the recalculation.
+     */
+    public boolean recalculateParamsPipelineUsages(final String projectId) {
+        List<ParamDto> allParams = projectService.getParams(projectId).getParams();
+        allParams.forEach(param -> param.getValue().getJobUsages().clear());
+        List<PipelineOverviewDto> allPips = getAll(projectId).getPipelines();
+        for(PipelineOverviewDto pipOverviewDto: allPips) {
+            PipelineResponseDto pipDto = getById(projectId, pipOverviewDto.getId());
+            List<String> foundParams = ProjectService.findParamsKeysInString(pipDto.getDefinition().toString());
+            if (!foundParams.isEmpty()) {
+                allParams
+                        .stream()
+                        .filter(param -> foundParams.contains(param.getKey()))
+                        .forEach(param -> param.getValue().getPipUsages().add(pipOverviewDto.getId()));
+            }
+        }
+        projectService.updateParamsWithoutProcessing(projectId, allParams);
+        return true;
     }
 
     /**
@@ -1843,18 +1886,6 @@ public class PipelineService {
             return Arrays.asList(dependencies.split(Pattern.quote(" && ")));
         }
         return Collections.emptyList();
-    }
-
-    public static JsonNode getDefinition(HasMetadata metadata) {
-        try {
-            return MAPPER
-                    .readTree(Base64.decodeBase64(metadata
-                            .getMetadata()
-                            .getAnnotations()
-                            .get(Constants.DEFINITION)));
-        } catch (IOException e) {
-            throw new JsonParseException(e);
-        }
     }
 
     /**

@@ -120,5 +120,4 @@ public class WorkflowTemplateSpec implements Serializable {
         }
         return this;
     }
-
 }

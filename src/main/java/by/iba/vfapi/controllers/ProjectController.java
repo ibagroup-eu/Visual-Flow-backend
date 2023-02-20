@@ -29,6 +29,7 @@ import by.iba.vfapi.dto.projects.ConnectionsDto;
 import by.iba.vfapi.dto.projects.ProjectOverviewListDto;
 import by.iba.vfapi.dto.projects.ProjectRequestDto;
 import by.iba.vfapi.dto.projects.ProjectResponseDto;
+import by.iba.vfapi.exceptions.BadRequestException;
 import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.services.ProjectService;
 import by.iba.vfapi.services.auth.AuthenticationService;
@@ -79,13 +80,13 @@ public class ProjectController {
     @Schema(ref = OpenApiConfig.SCHEMA_PROJECT_ID))})
     public ResponseEntity<String> create(@RequestBody @Valid final ProjectRequestDto projectDto) {
         LOGGER.info(
-            "{} - Creating project",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()));
+                "{} - Creating project",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()));
         String id = projectService.create(projectDto);
         LOGGER.info(
-            "{} - Project '{}' successfully created",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
-            id);
+                "{} - Project '{}' successfully created",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
         return ResponseEntity.status(HttpStatus.CREATED).body(id);
     }
 
@@ -99,24 +100,24 @@ public class ProjectController {
     @GetMapping("/{id}")
     public ProjectResponseDto get(@PathVariable final String id) {
         LOGGER.info(
-            "{} - Receiving project '{}' ",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
-            id);
+                "{} - Receiving project '{}' ",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
         return projectService.get(id);
     }
 
     /**
-     * Gets project list.
+     * Gets projects list.
      *
      * @return project list.
      */
     @Operation(summary = "Get list with all projects", description = "Get list with all projects that you have " +
-        "access to")
+            "access to")
     @GetMapping
     public ProjectOverviewListDto getAll() {
         LOGGER.info(
-            "{} - Receiving list of projects",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()));
+                "{} - Receiving list of projects",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()));
         return projectService.getAll();
     }
 
@@ -127,19 +128,19 @@ public class ProjectController {
      * @param projectDto new project params.
      */
     @Operation(summary = "Update the project", description = "Update existing project by providing new " +
-        "name/description/quota")
+            "name/description/quota")
     @PostMapping("/{id}")
     public void update(
-        @PathVariable final String id, @RequestBody @Valid final ProjectRequestDto projectDto) {
+            @PathVariable final String id, @RequestBody @Valid final ProjectRequestDto projectDto) {
         LOGGER.info(
-            "{} - Updating project '{}'",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
-            id);
+                "{} - Updating project '{}'",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
         projectService.update(id, projectDto);
         LOGGER.info(
-            "{} - Project '{}' description and resource quota successfully updated",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
-            id);
+                "{} - Project '{}' description and resource quota successfully updated",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
     }
 
     /**
@@ -149,19 +150,19 @@ public class ProjectController {
      * @return ResponseEntity with 204 status code.
      */
     @Operation(summary = "Delete the project", description = "Delete existing project with all related " +
-        "pipelines/jobs", responses = {@ApiResponse(responseCode = "204", description = "Indicates successful " +
-        "project deletion")})
+            "pipelines/jobs", responses = {@ApiResponse(responseCode = "204", description = "Indicates successful " +
+            "project deletion")})
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable final String id) {
         LOGGER.info(
-            "{} - Deleting project '{}'",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
-            id);
+                "{} - Deleting project '{}'",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
         projectService.delete(id);
         LOGGER.info(
-            "{} - Project '{}' successfully deleted",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
-            id);
+                "{} - Project '{}' successfully deleted",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
         return ResponseEntity.noContent().build();
     }
 
@@ -172,35 +173,37 @@ public class ProjectController {
      * @return project usage info.
      */
     @Operation(summary = "Get project resource utilization", description = "Get resource utilization by " +
-        "observing k8s pod metrics and quota")
+            "observing k8s pod metrics and quota")
     @GetMapping("/{id}/usage")
     public ResourceUsageDto getUsage(@PathVariable String id) {
         LOGGER.info(
-            "{} - Receiving project '{}' resource utilization",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
-            id);
+                "{} - Receiving project '{}' resource utilization",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
         return projectService.getUsage(id);
     }
 
     /**
      * Create or updates params for given project.
      *
+     * @deprecated
      * @param id        project id.
      * @param paramsDto list of parameters to create/update.
      */
     @Operation(summary = "Create or update project params", description = "Create/Update params for given project")
     @PostMapping("/{id}/params")
+    @Deprecated
     public void updateParams(
-        @PathVariable final String id, @RequestBody @Valid final List<ParamDto> paramsDto) {
+            @PathVariable final String id, @RequestBody @Valid final List<ParamDto> paramsDto) {
         LOGGER.info(
-            "{} - Updating params for project '{}'",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
-            id);
-        projectService.updateParams(id, paramsDto);
-        LOGGER.info(
-            "{} - Params for project '{}' successfully updated",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
-            id);
+                "{} - Updating params for project '{}'",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
+        List<ParamDto> forbidToDelete = projectService.updateParams(id, paramsDto);
+        if(!forbidToDelete.isEmpty()) {
+            throw new BadRequestException(
+                    "Some params cannot be deleted due to their use in connections, jobs or pipelines.");
+        }
     }
 
     /**
@@ -213,10 +216,70 @@ public class ProjectController {
     @GetMapping("/{id}/params")
     public ParamsDto getParams(@PathVariable final String id) {
         LOGGER.info(
-            "{} - Receiving params for the '{}' project",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
-            id);
+                "{} - Receiving params for the '{}' project",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
         return projectService.getParams(id);
+    }
+
+    /**
+     * Create a param for given project.
+     *
+     * @param projectId is a project id.
+     * @param paramKey is the created parameter key.
+     * @param newParamDto is the created parameter DTO.
+     */
+    @Operation(summary = "Create a project param", description = "Create a parameter for given project")
+    @PostMapping("/{projectId}/params/{paramKey}")
+    public void createParam(@PathVariable final String projectId, @PathVariable String paramKey,
+                            @RequestBody @Valid ParamDto newParamDto) {
+        LOGGER.info(
+                "{} - Creating {} param for project '{}'",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()), paramKey, projectId);
+        ParamDto paramDto = projectService.createParam(projectId, paramKey, newParamDto);
+        LOGGER.info(
+                "{} - The {} param for the '{}' project has been successfully created",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()), paramKey, projectId);
+        ResponseEntity.ok(paramDto);
+    }
+
+    /**
+     * Update a param for given project.
+     *
+     * @param projectId is a project id.
+     * @param paramKey is the updated parameter key.
+     * @param newParamDto is the updated parameter DTO.
+     */
+    @Operation(summary = "Update a project param", description = "Update a parameter for given project")
+    @PutMapping("/{projectId}/params/{paramKey}")
+    public void updateParam(@PathVariable final String projectId, @PathVariable String paramKey,
+                            @RequestBody @Valid ParamDto newParamDto) {
+        LOGGER.info(
+                "{} - Updating {} param for project '{}'",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()), paramKey, projectId);
+        ParamDto paramDto = projectService.updateParam(projectId, paramKey, newParamDto);
+        LOGGER.info(
+                "{} - The {} param for the '{}' project has been successfully updated",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()), paramKey, projectId);
+        ResponseEntity.ok(paramDto);
+    }
+
+    /**
+     * Delete a param for given project.
+     *
+     * @param projectId is a project id.
+     * @param paramKey is the parameter key should be deleted.
+     */
+    @Operation(summary = "Delete a project param", description = "Delete a parameter for given project")
+    @DeleteMapping("/{projectId}/params/{paramKey}")
+    public void deleteParam(@PathVariable final String projectId, @PathVariable String paramKey) {
+        LOGGER.info(
+                "{} - Deleting {} param for project '{}'",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()), paramKey, projectId);
+        projectService.deleteParam(projectId, paramKey);
+        LOGGER.info(
+                "{} - The {} param for the '{}' project has been successfully deleted",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()), paramKey, projectId);
     }
 
     /**
@@ -237,13 +300,14 @@ public class ProjectController {
 
     /**
      * Create or updates connections for given project.
-     *
+     * @deprecated
      * @param id        project id.
      * @param connectionsDto list of connections to create/update.
      */
     @Operation(summary = "Create or update project connections", description = "Create/Update connections " +
             "for given project")
     @PostMapping("/{id}/connections")
+    @Deprecated
     public void updateConnections(
             @PathVariable final String id, @RequestBody @Valid final List<ConnectDto> connectionsDto) {
         LOGGER.info(
@@ -272,7 +336,6 @@ public class ProjectController {
                 AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
                 name,
                 id);
-
         ConnectDto connection = projectService.getConnection(id, name);
         if (connection == null) {
             return ResponseEntity.notFound().build();
@@ -349,7 +412,7 @@ public class ProjectController {
                 AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
                 name,
                 id);
-       return ResponseEntity.noContent().build();
+        return ResponseEntity.noContent().build();
     }
 
     /**
@@ -359,24 +422,24 @@ public class ProjectController {
      * @param accessTable user - role map.
      */
     @Operation(summary = "Manage project access grants", description = "Replace existing access grants with " +
-        "provided ones")
+            "provided ones")
     @PostMapping("/{id}/users")
     @io.swagger.v3.oas.annotations.parameters.RequestBody(description = "The updated version of project grants " +
-        "that will replace old one. Note that usernames must point to existing users and roles must be defined " +
-        "as Cluster roles", content = {@Content(schema = @Schema(ref =
-        OpenApiConfig.SCHEMA_PROJECT_ACCESS_GRANTS))})
+            "that will replace old one. Note that usernames must point to existing users and roles must be defined " +
+            "as Cluster roles", content = {@Content(schema = @Schema(ref =
+            OpenApiConfig.SCHEMA_PROJECT_ACCESS_GRANTS))})
     public void applyAccessTable(
-        @PathVariable final String id, @RequestBody final Map<String, String> accessTable) {
+            @PathVariable final String id, @RequestBody final Map<String, String> accessTable) {
         LOGGER.info(
-            "{} - Applying access grants for the project '{}'",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
-            id);
+                "{} - Applying access grants for the project '{}'",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
         UserInfo currentUser = authenticationService.getUserInfo();
         projectService.createAccessTable(id, accessTable, currentUser.getUsername());
         LOGGER.info(
-            "{} - Grants for project '{}' successfully applied",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
-            id);
+                "{} - Grants for project '{}' successfully applied",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
     }
 
     /**
@@ -386,13 +449,30 @@ public class ProjectController {
      * @return user - role map.
      */
     @Operation(summary = "Get project access grants", description = "Fetch all users with roles that were " +
-        "assigned to them in given project")
+            "assigned to them in given project")
     @GetMapping("/{id}/users")
     public AccessTableDto getAccessTable(@PathVariable final String id) {
         LOGGER.info(
-            "{} - Receiving access grants table for the project '{}'",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
-            id);
+                "{} - Receiving access grants table for the project '{}'",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
         return projectService.getAccessTable(id);
+    }
+
+    /**
+     * Method for recalculating all params using in all connections. It may take some time to make a full
+     * recalculation.
+     * @param id is a project id.
+     * @return true, if recalculation completed successfully.
+     */
+    @Operation(summary = "Recalculate params usages for connections", description = "Recalculates usages of all" +
+            " params in all connections", hidden = true)
+    @PostMapping("/{id}/recalc/cons")
+    public boolean recalculateParamsConUsages(@PathVariable final String id) {
+        LOGGER.info(
+                "{} - Recalculation params connections usages for the project '{}'",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
+        return projectService.recalculateParamsConUsages(id);
     }
 }

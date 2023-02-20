@@ -23,6 +23,7 @@ import by.iba.vfapi.dao.JobHistoryRepository;
 import by.iba.vfapi.dao.LogRepositoryImpl;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.dto.projects.ParamDto;
+import by.iba.vfapi.dto.projects.ParamDataDto;
 import by.iba.vfapi.dto.projects.ParamsDto;
 import by.iba.vfapi.dto.projects.ConnectDto;
 import by.iba.vfapi.dto.projects.ConnectionsDto;
@@ -253,7 +254,11 @@ class KubernetesServiceTest {
         String namespace = "namespace";
         Secret expected = ParamsDto
             .builder()
-            .params(List.of(ParamDto.builder().key("test").value("val").secret(false).build()))
+            .params(List.of(ParamDto.builder()
+                    .key("test")
+                    .value(ParamDataDto.builder().text("val").build())
+                    .secret(false)
+                    .build()))
             .build()
             .toSecret()
             .build();
@@ -276,7 +281,10 @@ class KubernetesServiceTest {
         String namespace = "namespace";
         Secret secret = ParamsDto
             .builder()
-            .params(List.of(ParamDto.builder().key("test").value("val").secret(false).build()))
+            .params(List.of(ParamDto.builder()
+                    .key("test")
+                    .value(ParamDataDto.builder().text("val").build())
+                    .secret(false).build()))
             .build()
             .toSecret()
             .build();
@@ -298,7 +306,10 @@ class KubernetesServiceTest {
         String namespace = "namespace";
         Secret secret = ParamsDto
                 .builder()
-                .params(List.of(ParamDto.builder().key("test").value("val").secret(false).build()))
+                .params(List.of(ParamDto.builder()
+                        .key("test")
+                        .value(ParamDataDto.builder().text("val2").build())
+                        .secret(false).build()))
                 .build()
                 .toSecret()
                 .build();

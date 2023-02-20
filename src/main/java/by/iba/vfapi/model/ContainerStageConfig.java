@@ -111,7 +111,6 @@ public class ContainerStageConfig {
             .imagePullSecretType(ImagePullSecretType.valueOf(node
                                                                  .getValue()
                                                                  .get(Constants.NODE_IMAGE_PULL_SECRET_TYPE)));
-        String startCommand = tryToFetchFromParams(node.getValue().get(NODE_START_COMMAND), projectParams);
         switch (builder.imagePullSecretType) {
             case NEW:
                 builder
@@ -132,6 +131,7 @@ public class ContainerStageConfig {
             default:
                 break;
         }
+        String startCommand = tryToFetchFromParams(node.getValue().get(NODE_START_COMMAND), projectParams);
         if (startCommand != null) {
             builder.startCommand(startCommand);
         }
@@ -160,7 +160,7 @@ public class ContainerStageConfig {
         if (!projectParams.containsKey(paramName)) {
             return initialVal;
         }
-        return projectParams.get(paramName).getValue();
+        return projectParams.get(paramName).getValue().getText();
     }
 
     /**

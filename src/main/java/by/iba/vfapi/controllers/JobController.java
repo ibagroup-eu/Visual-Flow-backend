@@ -231,4 +231,19 @@ public class JobController {
             id,
             projectId);
     }
+
+    /**
+     * Method for recalculating all params using in all jobs. It may take some time to make a full
+     * recalculation.
+     * @param id is a project id.
+     * @return true, if recalculation completed successfully.
+     */
+    @PostMapping("/{id}/recalc/jobs")
+    public boolean recalculateParamsJobUsages(@PathVariable final String id) {
+        LOGGER.info(
+                "{} - Recalculation params job usages for the project '{}'",
+                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                id);
+        return jobService.recalculateParamsJobUsages(id);
+    }
 }

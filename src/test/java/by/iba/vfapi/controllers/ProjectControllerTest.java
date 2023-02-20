@@ -78,8 +78,8 @@ class ProjectControllerTest {
     @Test
     void testGetProjectList() {
         ProjectOverviewListDto expected = ProjectOverviewListDto.builder().projects(List.of(
-            ProjectOverviewDto.builder().name("name 1").build(),
-            ProjectOverviewDto.builder().name("name 2").build())).editable(true).build();
+                ProjectOverviewDto.builder().name("name 1").build(),
+                ProjectOverviewDto.builder().name("name 2").build())).editable(true).build();
         when(projectService.getAll()).thenReturn(expected);
         ProjectOverviewListDto actual = controller.getAll();
         assertEquals(expected, actual, "Project list must be equals to expected");
@@ -111,8 +111,8 @@ class ProjectControllerTest {
         String name = "name";
         doNothing().when(projectService).delete(name);
         assertEquals(ResponseEntity.status(HttpStatus.NO_CONTENT).build(),
-                     controller.delete(name),
-                     "Status must be 204");
+                controller.delete(name),
+                "Status must be 204");
 
         verify(projectService).delete(name);
     }
@@ -129,6 +129,26 @@ class ProjectControllerTest {
         ParamsDto result = controller.getParams(name);
         assertEquals(paramsDto, result, "Params must be equals to paramsDto");
         verify(projectService).getParams(name);
+    }
+
+    @Test
+    void testCreateParam() {
+        ParamDto newParam = ParamDto.builder().build();
+        controller.createParam("vf", "key", newParam);
+        verify(projectService).createParam("vf", "key", newParam);
+    }
+
+    @Test
+    void testUpdateParam() {
+        ParamDto newParam = ParamDto.builder().build();
+        controller.updateParam("vf", "key", newParam);
+        verify(projectService).updateParam("vf", "key", newParam);
+    }
+
+    @Test
+    void testDeleteParam() {
+        controller.deleteParam("vf", "key");
+        verify(projectService).deleteParam("vf", "key");
     }
 
     @Test
@@ -197,7 +217,7 @@ class ProjectControllerTest {
 
         ResourceQuotaRequestDto dto = ResourceQuotaRequestDto.builder().limitsCpu(5f).limitsMemory(10f).build();
         ProjectRequestDto projectDto =
-            ProjectRequestDto.builder().name(name).description(description).limits(dto).build();
+                ProjectRequestDto.builder().name(name).description(description).limits(dto).build();
 
         when(projectService.create(projectDto)).thenReturn(name);
 
@@ -219,11 +239,11 @@ class ProjectControllerTest {
         objectMeta.setAnnotations(Map.of(description, description));
         namespace.setMetadata(objectMeta);
         ProjectResponseDto expected = ProjectResponseDto
-            .builder()
-            .name(name)
-            .description(description)
-            .limits(ResourceQuotaResponseDto.builder().limitsMemory(10f).limitsCpu(10f).build())
-            .build();
+                .builder()
+                .name(name)
+                .description(description)
+                .limits(ResourceQuotaResponseDto.builder().limitsMemory(10f).limitsCpu(10f).build())
+                .build();
         when(projectService.get(name)).thenReturn(expected);
 
         ProjectResponseDto response = controller.get(name);
@@ -239,10 +259,10 @@ class ProjectControllerTest {
         accessTable.put("name2", "viewer");
         doNothing().when(projectService).createAccessTable("name", accessTable, "name1");
         when(authenticationService.getUserInfo()).thenReturn(new UserInfo("9",
-                                                                          "name",
-                                                                          "name1",
-                                                                          "email@gomel.iba.by",
-                                                                          true));
+                "name",
+                "name1",
+                "email@gomel.iba.by",
+                true));
 
         controller.applyAccessTable("name", accessTable);
 

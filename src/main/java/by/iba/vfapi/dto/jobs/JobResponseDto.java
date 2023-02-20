@@ -40,6 +40,7 @@ import lombok.Getter;
 import lombok.ToString;
 import org.apache.commons.codec.binary.Base64;
 
+
 /**
  * Single job response DTO class.
  */

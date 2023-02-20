@@ -82,6 +82,7 @@ public class TransferService {
     private final JobService jobService;
     private final PipelineService pipelineService;
     private final ProjectService projectService;
+    private final DependencyHandlerService dependencyHandlerService;
 
     /**
      * Exporting jobs by ids.
@@ -448,9 +449,12 @@ public class TransferService {
         ConfigMap configMap = argoKubernetesService.getConfigMap(projectId, jobId);
         copyEntity(projectId,
                 configMap,
-                (projId, confMap) -> jobService.createFromConfigMap(projId, confMap, false),
+                (String projId, ConfigMap confMap) -> {
+                    jobService.createFromConfigMap(projId, confMap, false);
+                    projectService.checkConnectionDependencies(projId, confMap.getMetadata().getName(),
+                            null, DependencyHandlerService.getDefinition(confMap));
+                },
                 argoKubernetesService.getAllConfigMaps(projectId));
-
     }
 
     /**

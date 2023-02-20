@@ -30,6 +30,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import redis.clients.jedis.exceptions.JedisConnectionException;
 
 /**
  * GlobalExceptionHandler is used to catch the most common errors.
@@ -91,5 +92,13 @@ public class GlobalExceptionHandler {
         String responseBody = apiException.getResponseBody();
         LOGGER.error("Status code: {}. Reason: {}", code, responseBody);
         return new ResponseEntity<>(responseBody, HttpStatus.valueOf(code));
+    }
+
+    @ExceptionHandler(JedisConnectionException.class)
+    public ResponseEntity<String> handleException(JedisConnectionException ex) {
+        LOGGER.error(ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body("Oops, Redis seems to be down. Contact your environment admin or try again later");
     }
 }

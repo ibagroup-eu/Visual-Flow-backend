@@ -29,14 +29,13 @@ import by.iba.vfapi.dto.jobs.JobOverviewListDto;
 import by.iba.vfapi.dto.jobs.JobRequestDto;
 import by.iba.vfapi.dto.jobs.JobResponseDto;
 import by.iba.vfapi.dto.jobs.PipelineJobOverviewDto;
+import by.iba.vfapi.dto.projects.ParamDto;
 import by.iba.vfapi.dto.projects.ParamsDto;
 import by.iba.vfapi.exceptions.BadRequestException;
 import by.iba.vfapi.exceptions.ConflictException;
 import by.iba.vfapi.exceptions.InternalProcessingException;
 import by.iba.vfapi.model.history.JobHistory;
 import by.iba.vfapi.services.auth.AuthenticationService;
-import by.iba.vfapi.model.argo.Parameter;
-import by.iba.vfapi.model.argo.WorkflowTemplate;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.ConfigMap;
@@ -56,7 +55,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import javax.validation.Valid;
@@ -85,6 +83,8 @@ public class JobService {
     private final ArgoKubernetesService argoKubernetesService;
     private final AuthenticationService authenticationService;
     private final PodService podService;
+    private final ProjectService projectService;
+    private final DependencyHandlerService dependencyHandlerService;
     private final JobHistoryRepository historyRepository;
 
     // Note that this constructor has the following sonar error: java:S107 - Methods should not have too many
@@ -96,9 +96,11 @@ public class JobService {
         @Value("${job.imagePullSecret}") final String imagePullSecret,
         @Value("${pvc.mountPath}") final String pvcMountPath,
         KubernetesService kubernetesService,
+        DependencyHandlerService dependencyHandlerService,
         ArgoKubernetesService argoKubernetesService,
         final AuthenticationService authenticationService,
         final PodService podService,
+        final ProjectService projectService,
         final JobHistoryRepository historyRepository) {
         this.jobImage = jobImage;
         this.jobMaster = jobMaster;
@@ -109,6 +111,8 @@ public class JobService {
         this.argoKubernetesService = argoKubernetesService;
         this.authenticationService = authenticationService;
         this.podService = podService;
+        this.projectService = projectService;
+        this.dependencyHandlerService = dependencyHandlerService;
         this.historyRepository = historyRepository;
     }
 
@@ -138,12 +142,14 @@ public class JobService {
      * @param jobRequestDto job request dto
      * @return id of job
      */
-    public String create(
-        final String projectId, @Valid final JobRequestDto jobRequestDto) {
+    public String create(final String projectId, @Valid final JobRequestDto jobRequestDto) {
         String jobName = jobRequestDto.getName();
         checkJobName(projectId, null, jobName);
         ConfigMap configMap = jobRequestDto.toConfigMap(UUID.randomUUID().toString());
-        return createFromConfigMap(projectId, configMap, true);
+        String jobId = createFromConfigMap(projectId, configMap, true);
+        projectService.checkConnectionDependencies(projectId, jobId, null,
+                DependencyHandlerService.getDefinition(configMap));
+        return jobId;
     }
 
     /**
@@ -177,13 +183,16 @@ public class JobService {
      * @param projectId     project id
      * @param jobRequestDto job request dto
      */
-    public void update(
-        final String id, final String projectId, @Valid final JobRequestDto jobRequestDto) {
+    public void update(final String id, final String projectId, @Valid final JobRequestDto jobRequestDto) {
         String jobName = jobRequestDto.getName();
         checkJobName(projectId, id, jobName);
 
+        ConfigMap oldConfigMap = kubernetesService.getConfigMap(projectId, id);
         ConfigMap newConfigMap = jobRequestDto.toConfigMap(id);
         kubernetesService.createOrReplaceConfigMap(projectId, newConfigMap);
+        projectService.checkConnectionDependencies(projectId, id,
+                DependencyHandlerService.getDefinition(oldConfigMap),
+                DependencyHandlerService.getDefinition(newConfigMap));
         try {
             kubernetesService.deletePod(projectId, id);
             kubernetesService.deletePodsByLabels(projectId, Map.of(Constants.JOB_ID_LABEL,
@@ -194,7 +203,19 @@ public class JobService {
                                                                    Constants.NOT_PIPELINE_FLAG));
         } catch (ResourceNotFoundException e) {
             LOGGER.info(KubernetesService.NO_POD_MESSAGE, e);
+            return;
         }
+
+        List<String> foundParams = ProjectService.findParamsKeysInString(jobRequestDto.getDefinition().toString());
+        List<ParamDto> existingParams = projectService.getParams(projectId).getParams();
+        for(ParamDto param : existingParams) {
+            if(foundParams.contains(param.getKey())) {
+                param.getValue().getJobUsages().add(id);
+            } else {
+                param.getValue().getJobUsages().remove(id);
+            }
+        }
+        projectService.updateParamsWithoutProcessing(projectId, existingParams);
     }
 
     /**
@@ -254,9 +275,7 @@ public class JobService {
         consumer.accept(kubernetesService.isAccessible(projectId, "configmaps", "", Constants.UPDATE_ACTION));
     }
 
-    private static void appendRunnable(Map<String, String> cmData,
-                                       Consumer<Boolean> consumer,
-                                       boolean accessibleToRun) {
+    private static void appendRunnable(Map<String, String> cmData, Consumer<Boolean> consumer, boolean accessibleToRun){
         String jobConfigField = cmData.get(Constants.JOB_CONFIG_FIELD);
         ObjectMapper objectMapper = new ObjectMapper();
         try {
@@ -342,9 +361,18 @@ public class JobService {
      * @param id        job id
      */
     public void delete(final String projectId, final String id) {
-        checkJobPresentInPipeline(projectId, id);
+        ConfigMap configMap = argoKubernetesService.getConfigMap(projectId, id);
+        if (!dependencyHandlerService.jobHasDepends(configMap)) {
+            throw new BadRequestException("The job is still being used by the pipeline");
+        }
+        projectService.checkConnectionDependencies(projectId, id,
+                DependencyHandlerService.getDefinition(configMap), null);
         kubernetesService.deleteConfigMap(projectId, id);
         kubernetesService.deletePodsByLabels(projectId, Map.of(Constants.JOB_ID_LABEL, id));
+
+        List<ParamDto> existingParams = projectService.getParams(projectId).getParams();
+        existingParams.forEach(param -> param.getValue().getJobUsages().remove(id));
+        projectService.updateParamsWithoutProcessing(projectId, existingParams);
     }
 
     /**
@@ -493,30 +521,26 @@ public class JobService {
     }
 
     /**
-     * Check if the job presents in the pipeline before delete it
+     * Method for recalculation all params usages in all jobs.
      *
-     * @param projectId  project id
-     * @param jobId      job id
+     * @param projectId is a project id.
+     * @return true, if there were not any errors during the recalculation.
      */
-    protected void checkJobPresentInPipeline(String projectId, String jobId) {
-        List<WorkflowTemplate> workflowTemplates = argoKubernetesService.getAllWorkflowTemplates(projectId);
-        for (WorkflowTemplate workflowTemplate : workflowTemplates) {
-            PipelineService
-                    .getDagTaskFromWorkflowTemplateSpec(workflowTemplate.getSpec())
-                    .stream()
-                    .map(task -> task
-                            .getArguments()
-                            .getParameters()
-                            .stream()
-                            .filter(param -> K8sUtils.CONFIGMAP.equals(param.getName()))
-                            .findFirst())
-                    .filter(Optional::isPresent)
-                    .forEach((Optional<Parameter> parameter) -> {
-                        if (jobId.equals(parameter.get().getValue())) {
-                            throw new BadRequestException("The job is still used in pipeline "
-                                    + workflowTemplate.getMetadata().getLabels().get("name"));
-                        }
-                    });
+    public boolean recalculateParamsJobUsages(final String projectId) {
+        List<ParamDto> allParams = projectService.getParams(projectId).getParams();
+        allParams.forEach(param -> param.getValue().getJobUsages().clear());
+        List<JobOverviewDto> allJobs = getAll(projectId).getJobs();
+        for(JobOverviewDto jobOverviewDto: allJobs) {
+            JobResponseDto jobDto = get(projectId, jobOverviewDto.getId());
+            List<String> foundParams = ProjectService.findParamsKeysInString(jobDto.getDefinition().toString());
+            if (!foundParams.isEmpty()) {
+                allParams
+                        .stream()
+                        .filter(param -> foundParams.contains(param.getKey()))
+                        .forEach(param -> param.getValue().getJobUsages().add(jobOverviewDto.getId()));
+            }
         }
+        projectService.updateParamsWithoutProcessing(projectId, allParams);
+        return true;
     }
 }

@@ -25,6 +25,7 @@ import by.iba.vfapi.dto.exporting.ExportResponseDto;
 import by.iba.vfapi.dto.importing.EntityDto;
 import by.iba.vfapi.dto.importing.ImportResponseDto;
 import by.iba.vfapi.dto.projects.ParamDto;
+import by.iba.vfapi.dto.projects.ParamDataDto;
 import by.iba.vfapi.dto.projects.ParamsDto;
 import by.iba.vfapi.dto.projects.ConnectDto;
 import by.iba.vfapi.dto.projects.ConnectionsDto;
@@ -45,6 +46,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+import lombok.SneakyThrows;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.lang3.SerializationUtils;
 import org.junit.jupiter.api.BeforeEach;
@@ -143,13 +146,15 @@ class TransferServiceTest {
     private JobService jobService;
     @Mock
     private PipelineService pipelineService;
-    private TransferService transferService;
     @Mock
     private ProjectService projectService;
-
+    @Mock
+    private DependencyHandlerService dependencyHandlerService;
+    private TransferService transferService;
     @BeforeEach
     void setUp() {
-        transferService = new TransferService(argoKubernetesService, jobService, pipelineService, projectService);
+        transferService = new TransferService(argoKubernetesService,
+                jobService, pipelineService, projectService, dependencyHandlerService);
     }
 
     @Test
@@ -352,8 +357,16 @@ class TransferServiceTest {
             .createOrReplaceWorkflowTemplate(eq("projectId"), any(WorkflowTemplate.class));
 
         List<ParamDto> paramDtos =
-            Arrays.asList(ParamDto.builder().key("someKey").value("someValue").secret(false).build(),
-                          ParamDto.builder().key("someKey1").value("someValue2").secret(false).build());
+            Arrays.asList(ParamDto.builder()
+                            .key("someKey")
+                            .value(ParamDataDto.builder().text("someValue").build())
+                            .secret(false)
+                            .build(),
+                          ParamDto.builder()
+                                  .key("someKey1")
+                                  .value(ParamDataDto.builder().text("someValue2").build())
+                                  .secret(false)
+                                  .build());
         ParamsDto paramsDto = ParamsDto.builder().editable(true).params(paramDtos).build();
         when(projectService.getParams(anyString())).thenReturn(paramsDto);
 
@@ -401,8 +414,23 @@ class TransferServiceTest {
         verify(argoKubernetesService).isAccessible(anyString(), anyString(), anyString(), anyString());
     }
 
+    @SneakyThrows
     @Test
     void testCopyJob() {
+        JsonNode GRAPH_JOB = new ObjectMapper().readTree(
+                "{\n" +
+                        "  \"graph\": [\n" +
+                        "    {\n" +
+                        "      \"value\": {\n" +
+                        "        \"jobId\": \"job1\",\n" +
+                        "        \"name\": \"testJob\",\n" +
+                        "        \"operation\": \"READ\"\n" +
+                        "      },\n" +
+                        "      \"id\": \"3\",\n" +
+                        "      \"vertex\": true\n" +
+                        "    }\n" +
+                        "  ]\n" +
+                        "}");
         ConfigMap configMap1 = new ConfigMapBuilder()
             .addToData(Map.of(Constants.EXECUTOR_MEMORY,
                               "1G",
@@ -414,7 +442,7 @@ class TransferServiceTest {
             .withName("jobId1")
             .addToLabels(Constants.NAME, "jobName2")
             .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-            .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String("GRAPH".getBytes()))
+            .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String(GRAPH_JOB.toString().getBytes()))
             .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
             .endMetadata()
             .build();
@@ -430,7 +458,7 @@ class TransferServiceTest {
             .withName("jobId2")
             .addToLabels(Constants.NAME, "jobName2-Copy")
             .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-            .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String("GRAPH".getBytes()))
+            .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String(GRAPH_JOB.toString().getBytes()))
             .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
             .endMetadata()
             .build();
@@ -445,7 +473,7 @@ class TransferServiceTest {
             .withName("jobId3")
             .addToLabels(Constants.NAME, "jobName2-Copy2")
             .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-            .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String("GRAPH".getBytes()))
+            .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String(GRAPH_JOB.toString().getBytes()))
             .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
             .endMetadata()
             .build();
@@ -460,7 +488,7 @@ class TransferServiceTest {
             .withName("jobId4")
             .addToLabels(Constants.NAME, "jobName2-Copy3")
             .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-            .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String("GRAPH".getBytes()))
+            .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String(GRAPH_JOB.toString().getBytes()))
             .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
             .endMetadata()
             .build();

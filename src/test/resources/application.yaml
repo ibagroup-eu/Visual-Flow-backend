@@ -51,6 +51,7 @@ namespace:
 pvc:
   memory: "1Gi"
   mountPath: "/files"
+  accessModes: ReadWriteMany
 job:
   imagePullSecret: test
   spark:

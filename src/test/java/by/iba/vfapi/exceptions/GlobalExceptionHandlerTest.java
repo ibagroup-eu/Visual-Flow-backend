@@ -32,14 +32,18 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import redis.clients.jedis.exceptions.JedisConnectionException;
 
 import javax.validation.ConstraintViolationException;
 
 import static by.iba.vfapi.exceptions.ExceptionsConstants.API_PATH;
 import static by.iba.vfapi.exceptions.ExceptionsConstants.MESSAGE;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -133,5 +137,18 @@ class GlobalExceptionHandlerTest {
         mockMvc.perform(get(API_PATH))
                 .andExpect(status().isInternalServerError())
                 .andExpect(content().string("An internal error has been occurred!"));
+    }
+
+    @Test
+    void testHandleJedisConnectionException() throws Exception {
+        JedisConnectionException exception = new JedisConnectionException("An internal error has been occurred!");
+        when(projectController.getAll()).thenThrow(exception);
+        MvcResult result = mockMvc.perform(get(API_PATH))
+                .andDo(print())
+                .andExpect(status().isInternalServerError())
+                .andReturn();
+        assertEquals("Oops, Redis seems to be down. Contact your environment admin or try again later",
+                result.getResponse().getContentAsString(),
+                "Exception messages should be equal!");
     }
 }

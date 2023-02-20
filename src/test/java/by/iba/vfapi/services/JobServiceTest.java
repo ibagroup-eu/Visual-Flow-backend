@@ -28,6 +28,7 @@ import by.iba.vfapi.dto.jobs.JobOverviewListDto;
 import by.iba.vfapi.dto.jobs.JobRequestDto;
 import by.iba.vfapi.dto.jobs.JobResponseDto;
 import by.iba.vfapi.dto.jobs.PipelineJobOverviewDto;
+import by.iba.vfapi.dto.projects.ParamsDto;
 import by.iba.vfapi.exceptions.BadRequestException;
 import by.iba.vfapi.exceptions.ConflictException;
 import by.iba.vfapi.model.JobParams;
@@ -57,8 +58,11 @@ import io.fabric8.kubernetes.api.model.metrics.v1beta1.PodMetricsBuilder;
 import io.fabric8.kubernetes.client.ResourceNotFoundException;
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+
 import org.apache.commons.codec.binary.Base64;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -69,7 +73,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
@@ -135,13 +138,17 @@ class JobServiceTest {
     @Mock
     private PodService podService;
     @Mock
+    private ProjectService projectService;
+    @Mock
+    private DependencyHandlerService dependencyHandlerService;
+    @Mock
     private JobHistoryRepository historyRepository;
     private JobService jobService;
 
     @BeforeEach
     void setUp() {
         this.jobService = new JobService("image", "master", "spark", "pullSecret", "mountPath",
-            kubernetesService, argoKubernetesService, authenticationService, podService, historyRepository);
+            kubernetesService, dependencyHandlerService, argoKubernetesService, authenticationService, podService, projectService, historyRepository);
     }
 
     @Test
@@ -207,7 +214,24 @@ class JobServiceTest {
                                                                                        Constants.SPARK_ROLE_EXEC,
                                                                                        Constants.PIPELINE_JOB_ID_LABEL,
                                                                                        Constants.NOT_PIPELINE_FLAG));
+        ConfigMap configMap = new ConfigMapBuilder()
+                .addToData(Map.of(Constants.EXECUTOR_MEMORY,
+                        "1G",
+                        Constants.DRIVER_MEMORY,
+                        "1G",
+                        Constants.JOB_CONFIG_FIELD,
+                        "{\"nodes\":[], \"edges\":[]}"))
+                .withNewMetadata()
+                .withName("jobId1")
+                .addToLabels(Constants.NAME, "jobName2")
+                .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
+                .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String("{\"graph\":[]}".getBytes()))
+                .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
+                .endMetadata()
+                .build();
 
+        when(kubernetesService.getConfigMap("projectId", "id")).thenReturn(configMap);
+        when(projectService.getParams("projectId")).thenReturn(ParamsDto.builder().params(new LinkedList<>()).build());
         jobService.update("id",
                           "projectId",
                           JobRequestDto
@@ -233,8 +257,28 @@ class JobServiceTest {
 
     @Test
     void testDelete() {
+        ConfigMap configMap = new ConfigMapBuilder()
+                .addToData(Map.of(Constants.EXECUTOR_MEMORY,
+                        "1G",
+                        Constants.DRIVER_MEMORY,
+                        "1G",
+                        Constants.JOB_CONFIG_FIELD,
+                        "{\"nodes\":[], \"edges\":[]}"))
+                .withNewMetadata()
+                .withName("jobId1")
+                .addToLabels(Constants.NAME, "jobName2")
+                .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
+                .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String("{\"graph\":[]}".getBytes()))
+                .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
+                .endMetadata()
+                .build();
+
+        when(argoKubernetesService.getConfigMap("projectId", "id")).thenReturn(configMap);
+        when(dependencyHandlerService.jobHasDepends(any(ConfigMap.class))).thenReturn(true);
+
         doNothing().when(kubernetesService).deleteConfigMap("projectId", "id");
         doNothing().when(kubernetesService).deletePodsByLabels("projectId", Map.of(Constants.JOB_ID_LABEL, "id"));
+        when(projectService.getParams("projectId")).thenReturn(ParamsDto.builder().params(new LinkedList<>()).build());
 
         jobService.delete("projectId", "id");
 
@@ -344,6 +388,7 @@ class JobServiceTest {
                                            .usage(ResourceUsageDto.builder().cpu(0.25f).memory(0.25f).build())
                                            .build()))
                 .tags(List.of("value1"))
+                .dependentPipelineIds(new HashSet<>())
             .build();
 
         assertEquals(expected, projectId.getJobs().get(0), "Job must be equals to expected");
@@ -478,26 +523,5 @@ class JobServiceTest {
                 .dag(dagTemplate))));
 
         return List.of(workflowTemplate);
-    }
-
-    @Test
-    void testCheckJobPresentInPipelineThrowsException() {
-        List<WorkflowTemplate> workflowTemplates = getMockedWorkflowTemplates();
-        when(argoKubernetesService.getAllWorkflowTemplates("projectId")).thenReturn(workflowTemplates);
-
-        assertThrows(BadRequestException.class,
-                () -> jobService.checkJobPresentInPipeline("projectId", "jobId"),
-                "Expected exception must be thrown");
-    }
-
-    @Test
-    void testCheckJobPresentInPipelineSuccess() {
-        List<WorkflowTemplate> workflowTemplates = getMockedWorkflowTemplates();
-        when(argoKubernetesService.getAllWorkflowTemplates("projectId")).thenReturn(workflowTemplates);
-
-        jobService.checkJobPresentInPipeline("projectId", "jobId1");
-        verify(argoKubernetesService).getAllWorkflowTemplates("projectId");
-
-        assertDoesNotThrow(() -> jobService.checkJobPresentInPipeline("projectId", "jobId1"));
     }
 }

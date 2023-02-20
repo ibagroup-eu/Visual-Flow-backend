@@ -74,6 +74,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedList;
 import java.util.HashSet;
 import java.util.HashMap;
 import java.util.stream.Collectors;
@@ -187,6 +188,8 @@ class PipelineServiceTest {
     @Mock
     private ProjectService projectService;
     @Mock
+    private DependencyHandlerService dependencyHandlerService;
+    @Mock
     private WorkflowServiceApi apiInstance;
     private PipelineService pipelineService;
     @Mock
@@ -205,6 +208,7 @@ class PipelineServiceTest {
             apiInstance,
             workflowService,
             authenticationService,
+            dependencyHandlerService,
             pipelineHistoryRepository);
     }
 
@@ -268,9 +272,6 @@ class PipelineServiceTest {
         when(argoKubernetesService.getWorkflowTemplate(eq("projectId"), anyString()))
                 .thenThrow(new ResourceNotFoundException(""));
 
-        when(argoKubernetesService.getWorkflowTemplate(eq("projectId"),eq("pl1")))
-                .thenReturn(workflowTemplate);
-
         doNothing()
                 .when(argoKubernetesService)
                 .createOrReplaceWorkflowTemplate(eq("projectId"), any(WorkflowTemplate.class));
@@ -283,7 +284,7 @@ class PipelineServiceTest {
                 .recipients(Arrays.asList("JaneDoe", "DoeJane"))
                 .tags(Arrays.asList("VF-Demo", "VF-Migration")));
 
-        verify(argoKubernetesService, times(2)).createOrReplaceWorkflowTemplate(anyString(),
+        verify(argoKubernetesService).createOrReplaceWorkflowTemplate(anyString(),
                 any(WorkflowTemplate.class));
     }
 
@@ -926,7 +927,6 @@ class PipelineServiceTest {
                         .name(Constants.DAG_TEMPLATE_NAME)
                         .dag(new DagTemplate()))));
 
-        when(argoKubernetesService.getWorkflowTemplate(eq("projectId"), anyString())).thenReturn(workflowTemplate);
         PipelineParams params =  new PipelineParams()
                 .successNotify(true)
                 .failureNotify(false)
@@ -982,7 +982,6 @@ class PipelineServiceTest {
                         .name(Constants.DAG_TEMPLATE_NAME)
                         .dag(new DagTemplate()))));
 
-        when(argoKubernetesService.getWorkflowTemplate(eq("projectId"), anyString())).thenReturn(workflowTemplate);
         PipelineParams params = new PipelineParams()
                 .successNotify(true)
                 .failureNotify(false)
@@ -992,7 +991,7 @@ class PipelineServiceTest {
 
         pipelineService.update("projectId", "id", GRAPH, params, "newName");
 
-        verify(argoKubernetesService, times(2)).createOrReplaceWorkflowTemplate(anyString(), any(WorkflowTemplate.class));
+        verify(argoKubernetesService).createOrReplaceWorkflowTemplate(anyString(), any(WorkflowTemplate.class));
     }
 
     @Test
@@ -1015,8 +1014,11 @@ class PipelineServiceTest {
                         .dag(new DagTemplate()))));
 
         when(argoKubernetesService.getWorkflowTemplate(anyString(),anyString())).thenReturn(workflowTemplate);
+        when(dependencyHandlerService.pipelineHasDepends(any(WorkflowTemplate.class))).thenReturn(true);
+
         doNothing().when(argoKubernetesService).deleteWorkflowTemplate("projectId", "id");
         doNothing().when(argoKubernetesService).deleteWorkflow("projectId", "id");
+        when(projectService.getParams("projectId")).thenReturn(ParamsDto.builder().params(new LinkedList<>()).build());
 
         pipelineService.delete("projectId", "id");
 
@@ -1317,7 +1319,8 @@ class PipelineServiceTest {
         verify(argoKubernetesService).createOrReplaceCronWorkflow(eq("projectId"), any(CronWorkflow.class));
 
         when(argoKubernetesService.getCronWorkflow("projectId", "id")).thenThrow(ResourceNotFoundException.class);
-        assertThrows(BadRequestException.class, () -> pipelineService.updateCron("projectId", "id", cronPipelineDto));
+        assertThrows(BadRequestException.class, () -> pipelineService.updateCron("projectId", "id", cronPipelineDto),
+                "Expected exception must be thrown");
     }
 
     @Test
@@ -1362,7 +1365,7 @@ class PipelineServiceTest {
                 .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
                 .build());
 
-        JsonNode response = PipelineService.getDefinition(workflowTemplate);
+        JsonNode response = dependencyHandlerService.getDefinition(workflowTemplate);
         assertEquals(GRAPH, response, "Name must be equals to expected");
     }
 
@@ -1377,7 +1380,8 @@ class PipelineServiceTest {
                         Base64.encodeBase64String("test".getBytes()))
                 .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
                 .build());
-        assertThrows(JsonParseException.class, () -> PipelineService.getDefinition(workflowTemplate));
+        assertThrows(JsonParseException.class, () -> dependencyHandlerService.getDefinition(workflowTemplate),
+                "Expected exception must be thrown");
     }
 
     @Test

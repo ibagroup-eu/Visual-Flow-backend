@@ -29,7 +29,6 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -40,7 +39,6 @@ import java.util.stream.Collectors;
 @Slf4j
 public class DatabasesService {
 
-    private static final Pattern PARAM_MATCH_PATTERN = Pattern.compile("#(.*?)#");
     private final ProjectService projectService;
 
     /**
@@ -56,14 +54,15 @@ public class DatabasesService {
             return null;
         }
         List<ParamDto> params = projectService.getParams(id).getParams();
-        Map<String, String> paramsMap = params.stream().collect(Collectors.toMap(ParamDto::getKey, ParamDto::getValue));
+        Map<String, String> paramsMap = params.stream().collect(Collectors.toMap(ParamDto::getKey,
+                paramDto -> paramDto.getValue().getText()));
         String conStrRepresentation = connection.getValue().toString();
-        Matcher matcher = PARAM_MATCH_PATTERN.matcher(conStrRepresentation);
+        Matcher matcher = ProjectService.PARAM_MATCH_PATTERN.matcher(conStrRepresentation);
         while(matcher.find()) {
             String found = matcher.group(1);
             if(paramsMap.containsKey(found)) {
                 conStrRepresentation = conStrRepresentation.replace(matcher.group(), paramsMap.get(found));
-                matcher = PARAM_MATCH_PATTERN.matcher(conStrRepresentation);
+                matcher = ProjectService.PARAM_MATCH_PATTERN.matcher(conStrRepresentation);
             }
         }
         try {

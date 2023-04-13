@@ -56,11 +56,11 @@ Make sure that user, which you are logged in, has permission to list all namespa
 
 ## Argo Workflows
 [Argo Workflows](https://github.com/argoproj/argo-workflows) engine should be installed in target kubernetes cluster. Visual Flow app requires argo workflows web server to work with pipelines. You can deploy server to target kubernetes cluster or start it locally with argo workflows cli. You should put url to argo workflows web server to argo.serverUrl field in application.yaml file.
-How to install and configure argo worklows: [Visual-Flow-deploy/README.md#argo-workflows](https://github.com/ibagomel/Visual-Flow-deploy#argo-workflows)
+How to install and configure argo worklows: [Visual-Flow-deploy/README.md#argo-workflows](https://github.com/ibagroup-eu/Visual-Flow-deploy#argo-workflows)
 
 
 ## Spark
-Visual Flow app uses [spark job](https://github.com/ibagomel/Visual-Flow-jobs) to work with data. All required tools to run spark jobs located in spark job docker image. _No additional services are required._
+Visual Flow app uses [spark job](https://github.com/ibagroup-eu/Visual-Flow-jobs) to work with data. All required tools to run spark jobs located in spark job docker image. _No additional services are required._
 
 
 ## Application configuration

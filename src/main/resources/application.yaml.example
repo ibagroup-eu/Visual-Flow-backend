@@ -38,7 +38,7 @@ server:
       include-binding-errors: always
 db-service:
   host: ${DB_SERVICE_HOST}                        # Database Service host. Use HTTP protocol.
-# See documentation about configuring authentication at this link: https://github.com/ibagomel/Visual-Flow-deploy/blob/main/OAUTH.md
+# See documentation about configuring authentication at this link: https://github.com/ibagroup-eu/Visual-Flow-deploy/blob/main/OAUTH.md
 oauth:
   url:
     userInfo: ${USERINFO_ENDPOINT}                # URL pointing to userInfo endpoint on oauth server (for ex. Github: https://api.github.com/user, Keycloak: {ADDRESS}/auth/realms/{REALM}/protocol/openid-connect/userinfo)

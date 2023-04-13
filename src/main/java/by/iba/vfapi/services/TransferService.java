@@ -493,9 +493,7 @@ public class TransferService {
                     .getMetadata()
                     .getName())));
             wfTemplate.getSpec().setImagePullSecrets(listOfSecrets);
-            wfTemplate.getSpec().setPipelineParams(
-                    workflowTemplate.getSpec().getPipelineParams().dependentPipelineIds(Collections.emptySet())
-            );
+            wfTemplate.getSpec().getPipelineParams().setDependentPipelineIds(Set.of());
             wfTemplate.getMetadata().setName(newPipelineId);
             argoKubernetesService.createOrReplaceWorkflowTemplate(projectId, wfTemplate);
         }, argoKubernetesService.getAllWorkflowTemplates(projectId));

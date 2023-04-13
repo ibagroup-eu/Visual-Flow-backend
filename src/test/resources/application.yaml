@@ -17,6 +17,7 @@
 # limitations under the License.
 #
 server:
+  host: host
   ssl:
     key-store: ./tmp/uicert/tls.p12
     key-store-password: password
@@ -36,6 +37,7 @@ oauth:
   url:
     base: https://basepath
     userInfo: ${oauth.url.base}/api/v4/user
+  provider: github
 auth:
   id: test-id
   username: test-login
@@ -44,6 +46,26 @@ auth:
 superusers:
   set:
     - Superuser
+notifications:
+  image: image
+  slack:
+    token: test-token
+  mail:
+    default-encoding: UTF-8
+    host: localhost
+    jndi-name:
+    username: email
+    password: changeit
+    port: 3025
+    properties:
+      mail:
+        debug: false
+        smtp:
+          debug: false
+          auth: true
+          starttls: true
+    protocol: smtp
+    test-connection: false
 namespace:
   app: vf
   label: testApp
@@ -60,9 +82,6 @@ job:
     serviceAccount: test
     roleBinding: test
     podStopCommand: "pkill -SIGTERM -u job-user"
-  slack:
-    image: test
-    apiToken: test
 argo:
   serverUrl: test
   limits:

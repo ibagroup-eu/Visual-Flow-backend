@@ -47,7 +47,7 @@ public class Container implements Serializable {
     private List<String> args;
     private String imagePullPolicy;
     private ResourceRequirements resources;
-    private List<VolumeMount> volumeMount;
+    private List<VolumeMounts> volumeMounts;
 
     /**
      * Setter for image.
@@ -146,14 +146,14 @@ public class Container implements Serializable {
     }
 
     /**
-     * Setter for volumeMount.
+     * Setter for volumeMounts.
      *
-     * @param volumeMount volumeMount
+     * @param volumeMounts volumeMounts
      * @return this
      */
-    public Container volumeMount(Collection<VolumeMount> volumeMount) {
-        if (volumeMount != null) {
-            this.volumeMount = new ArrayList<>(volumeMount);
+    public Container volumeMounts(Collection<VolumeMounts> volumeMounts) {
+        if (volumeMounts != null) {
+            this.volumeMounts = new ArrayList<>(volumeMounts);
         }
         return this;
     }

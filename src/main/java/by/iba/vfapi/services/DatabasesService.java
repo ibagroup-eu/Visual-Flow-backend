@@ -26,6 +26,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+
+import javax.validation.Valid;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -53,7 +55,19 @@ public class DatabasesService {
         if(connection == null) {
             return null;
         }
-        List<ParamDto> params = projectService.getParams(id).getParams();
+
+        return replaceParams(id, connection);
+    }
+
+    /**
+     * Method for replacing keys by values for connections.
+     * In addition, parses connection params and replaces them to their values.
+     * @param projectId is the project id.
+     * @param connection is the connection.
+     * @return parsed connection object with filled params.
+     */
+    public ConnectDto replaceParams(String projectId, @Valid ConnectDto connection){
+        List<ParamDto> params = projectService.getParams(projectId).getParams();
         Map<String, String> paramsMap = params.stream().collect(Collectors.toMap(ParamDto::getKey,
                 paramDto -> paramDto.getValue().getText()));
         String conStrRepresentation = connection.getValue().toString();
@@ -73,5 +87,4 @@ public class DatabasesService {
         }
         return connection;
     }
-
 }

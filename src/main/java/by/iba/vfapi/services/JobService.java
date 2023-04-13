@@ -39,6 +39,7 @@ import by.iba.vfapi.services.auth.AuthenticationService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.ConfigMap;
+import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.ContainerStateTerminated;
 import io.fabric8.kubernetes.api.model.EnvFromSourceBuilder;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
@@ -86,6 +87,7 @@ public class JobService {
     private final ProjectService projectService;
     private final DependencyHandlerService dependencyHandlerService;
     private final JobHistoryRepository historyRepository;
+
 
     // Note that this constructor has the following sonar error: java:S107 - Methods should not have too many
     // parameters. This error has been added to ignore list due to the current inability to solve this problem.
@@ -188,7 +190,11 @@ public class JobService {
         checkJobName(projectId, id, jobName);
 
         ConfigMap oldConfigMap = kubernetesService.getConfigMap(projectId, id);
-        ConfigMap newConfigMap = jobRequestDto.toConfigMap(id);
+        ConfigMap newConfigMap = new ConfigMapBuilder(jobRequestDto.toConfigMap(id))
+                .addToData(Constants.DEPENDENT_PIPELINE_IDS,
+                        oldConfigMap.getData().get(Constants.DEPENDENT_PIPELINE_IDS))
+                .build();
+
         kubernetesService.createOrReplaceConfigMap(projectId, newConfigMap);
         projectService.checkConnectionDependencies(projectId, id,
                 DependencyHandlerService.getDefinition(oldConfigMap),
@@ -253,9 +259,9 @@ public class JobService {
             List<PipelineJobOverviewDto> pipelineJobOverviewDtos = new ArrayList<>(workflowPods.size());
             for (Pod workflowPod : workflowPods) {
                 PipelineJobOverviewDto pipelineJobOverviewDto = PipelineJobOverviewDto
-                    .fromPod(workflowPod)
-                    .usage(getJobUsage(projectId, jobId, workflowPod.getMetadata().getName()))
-                    .build();
+                        .fromPod(workflowPod)
+                        .usage(getJobUsage(projectId, jobId, workflowPod.getMetadata().getName()))
+                        .build();
                 pipelineJobOverviewDtos.add(pipelineJobOverviewDto);
             }
 

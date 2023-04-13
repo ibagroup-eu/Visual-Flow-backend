@@ -19,99 +19,40 @@
 
 package by.iba.vfapi.model.argo;
 
+import lombok.Getter;
+import lombok.Setter;
+import lombok.Builder;
+import lombok.AllArgsConstructor;
+import lombok.NoArgsConstructor;
+import lombok.EqualsAndHashCode;
+import java.util.Set;
+import java.util.List;
+import java.io.Serializable;
+import by.iba.vfapi.model.notifications.EmailNotification;
+import by.iba.vfapi.model.notifications.SlackNotification;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
-
-import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.HashSet;
-import java.util.Set;
 
 /**
- * Parameter in workflows.
+ * Workflow parameters.
  */
-@NoArgsConstructor
+
 @Getter
 @Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @EqualsAndHashCode
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class PipelineParams implements Serializable {
     private static final long serialVersionUID = 1;
-    @JsonProperty("NOTIFY_FAILURE")
-    private Boolean failureNotify;
-    @JsonProperty("NOTIFY_SUCCESS")
-    private Boolean successNotify;
-    @JsonProperty("RECIPIENTS")
-    private List<String> recipients;
+
     @JsonProperty("TAGS")
     private List<String> tags;
+    @JsonProperty("EMAIL")
+    private EmailNotification email;
+    @JsonProperty("SLACK")
+    private SlackNotification slack;
     @JsonProperty("DEPENDENT_PIPELINE_IDS")
     private Set<String> dependentPipelineIds;
-
-    /**
-     * Setter for name.
-     *
-     * @param failureNotify failureNotify
-     * @return this
-     */
-    public PipelineParams failureNotify(Boolean failureNotify) {
-        this.failureNotify = failureNotify;
-        return this;
-    }
-
-    /**
-     * Setter for value.
-     *
-     * @param successNotify successNotify
-     * @return this
-     */
-    public PipelineParams successNotify(Boolean successNotify) {
-        this.successNotify = successNotify;
-        return this;
-    }
-
-    /**
-     * Setter for recipients.
-     *
-     * @param recipients recipients
-     * @return this
-     */
-    public PipelineParams recipients(Collection<String> recipients) {
-        if (recipients != null) {
-            this.recipients = new ArrayList<>(recipients);
-        }
-        return this;
-    }
-
-    /**
-     * Setter for tags.
-     *
-     * @param  tags tags
-     * @return this
-     */
-    public PipelineParams tags(Collection<String> tags) {
-        if (tags != null) {
-            this.tags = new ArrayList<>(tags);
-        }
-        return this;
-    }
-
-    /**
-     * Setter for dependentPipelineIds.
-     *
-     * @param  dependentPipelineIds dependentPipelineIds
-     * @return this
-     */
-    public PipelineParams dependentPipelineIds(Collection<String> dependentPipelineIds) {
-        if (dependentPipelineIds != null) {
-            this.dependentPipelineIds = new HashSet<>(dependentPipelineIds);
-        }
-        return this;
-    }
 }

@@ -41,11 +41,11 @@ public class WorkflowTemplateSpec implements Serializable {
     private static final long serialVersionUID = 1;
 
     private String entrypoint;
+    private String onExit;
     private List<Template> templates;
     private String serviceAccountName;
     private List<ImagePullSecret> imagePullSecrets;
     private PipelineParams pipelineParams;
-    private List<Volumes> volumes;
 
     /**
      * Setter for entrypoint.
@@ -55,6 +55,17 @@ public class WorkflowTemplateSpec implements Serializable {
      */
     public WorkflowTemplateSpec entrypoint(String entrypoint) {
         this.entrypoint = entrypoint;
+        return this;
+    }
+
+    /**
+     * Setter for onExit.
+     *
+     * @param onExit onExit
+     * @return this
+     */
+    public WorkflowTemplateSpec onExit(String onExit) {
+        this.onExit = onExit;
         return this;
     }
 
@@ -104,19 +115,6 @@ public class WorkflowTemplateSpec implements Serializable {
     public WorkflowTemplateSpec pipelineParams(PipelineParams  pipelineParams) {
         if (pipelineParams != null) {
             this.pipelineParams = pipelineParams;
-        }
-        return this;
-    }
-
-    /**
-     * Setter for volumes.
-     *
-     * @param volumes volumes
-     * @return this
-     */
-    public WorkflowTemplateSpec volumes(Collection<Volumes> volumes) {
-        if (volumes != null) {
-            this.volumes = new ArrayList<>(volumes);
         }
         return this;
     }

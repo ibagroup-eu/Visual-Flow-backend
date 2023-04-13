@@ -21,22 +21,22 @@ package by.iba.vfapi.model.argo;
 
 import lombok.Getter;
 import lombok.Setter;
-import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
+import lombok.EqualsAndHashCode;
 
 import java.io.Serializable;
 
 /**
- * Volumes in container.
+ * VolumeMount in container.
  */
 @Getter
 @Setter
-@NoArgsConstructor
 @EqualsAndHashCode
-public class Volumes implements Serializable {
+@NoArgsConstructor
+public class VolumeMounts implements Serializable {
     private static final long serialVersionUID = 1;
     private String name;
-    private PersistentVolumeClaim persistentVolumeClaim;
+    private String mountPath;
 
     /**
      * Setter for name.
@@ -44,19 +44,19 @@ public class Volumes implements Serializable {
      * @param name name
      * @return this
      */
-    public Volumes name(String name) {
+    public VolumeMounts name(String name) {
         this.name = name;
         return this;
     }
 
     /**
-     * Setter for persistentVolumeClaim.
+     * Setter for mountPath.
      *
-     * @param persistentVolumeClaim persistent volume claim
+     * @param mountPath mount path
      * @return this
      */
-    public Volumes persistentVolumeClaim(PersistentVolumeClaim persistentVolumeClaim) {
-        this.persistentVolumeClaim = persistentVolumeClaim;
+    public VolumeMounts mountPath(String mountPath) {
+        this.mountPath = mountPath;
         return this;
     }
 }

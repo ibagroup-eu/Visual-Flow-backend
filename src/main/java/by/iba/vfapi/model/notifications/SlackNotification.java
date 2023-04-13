@@ -17,46 +17,24 @@
  * limitations under the License.
  */
 
-package by.iba.vfapi.model.argo;
+package by.iba.vfapi.model.notifications;
 
-import lombok.EqualsAndHashCode;
 import lombok.Getter;
-import lombok.NoArgsConstructor;
 import lombok.Setter;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
+import lombok.experimental.SuperBuilder;
+import java.util.List;
+import java.util.ArrayList;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.io.Serializable;
-
-/**
- * VolumeMount in container.
- */
-@NoArgsConstructor
 @Getter
 @Setter
-@EqualsAndHashCode
-public class VolumeMount implements Serializable {
+@SuperBuilder
+@NoArgsConstructor
+@AllArgsConstructor
+public class SlackNotification extends Notification {
     private static final long serialVersionUID = 1;
-    private String name;
-    private String mountPath;
-
-    /**
-     * Setter for name.
-     *
-     * @param name name
-     * @return this
-     */
-    public VolumeMount name(String name) {
-        this.name = name;
-        return this;
-    }
-
-    /**
-     * Setter for mountPath.
-     *
-     * @param mountPath mount path
-     * @return this
-     */
-    public VolumeMount mountPath(String mountPath) {
-        this.mountPath = mountPath;
-        return this;
-    }
+    @JsonProperty("CHANNELS")
+    private List<String> channels = new ArrayList<>();
 }

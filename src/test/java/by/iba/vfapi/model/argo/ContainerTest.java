@@ -39,7 +39,7 @@ public class ContainerTest {
         first_obj.setArgs(Collections.emptyList());
         first_obj.setImagePullPolicy("image_pull");
         first_obj.setResources(new ResourceRequirements());
-        first_obj.setVolumeMount(Collections.emptyList());
+        first_obj.setVolumeMounts(Collections.emptyList());
         Container second_obj = new Container();
         assertNotEquals(first_obj, second_obj, "Objects must NOT be equal!");
     }

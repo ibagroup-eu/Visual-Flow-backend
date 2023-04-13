@@ -80,6 +80,7 @@ public class DatabasesControllerTest {
     public void testPing2() {
         String projectId = "project";
         ConnectDto dto = Mockito.mock(ConnectDto.class);
+        when(databasesService.replaceParams(projectId, dto)).thenReturn(dto);
         when(restTemplate.postForEntity("host", dto, PingStatusDto.class)).
                 thenReturn(new ResponseEntity<>(PingStatusDto.builder().status(true).build(),HttpStatus.OK));
         ResponseEntity<PingStatusDto> actual = controller.ping(projectId, dto);

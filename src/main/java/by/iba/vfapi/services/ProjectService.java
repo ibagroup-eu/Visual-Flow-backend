@@ -97,6 +97,7 @@ public class ProjectService {
     private final KubernetesService kubernetesService;
     private final AuthenticationService authenticationService;
 
+
     public ProjectService(
         final KubernetesService kubernetesService,
         @Value("${namespace.prefix}") final String namespacePrefix,

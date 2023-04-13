@@ -19,44 +19,55 @@
 
 package by.iba.vfapi.model.argo;
 
-import lombok.Getter;
-import lombok.Setter;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.EqualsAndHashCode;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.io.Serializable;
 
-/**
- * Volumes in container.
- */
+@NoArgsConstructor
 @Getter
 @Setter
-@NoArgsConstructor
 @EqualsAndHashCode
-public class Volumes implements Serializable {
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class Step implements Serializable {
     private static final long serialVersionUID = 1;
     private String name;
-    private PersistentVolumeClaim persistentVolumeClaim;
+    private String template;
+    private String when;
 
     /**
      * Setter for name.
      *
-     * @param name name
+     * @param name value
      * @return this
      */
-    public Volumes name(String name) {
+    public Step name(String name) {
         this.name = name;
         return this;
     }
 
     /**
-     * Setter for persistentVolumeClaim.
+     * Setter for template.
      *
-     * @param persistentVolumeClaim persistent volume claim
+     * @param template value
      * @return this
      */
-    public Volumes persistentVolumeClaim(PersistentVolumeClaim persistentVolumeClaim) {
-        this.persistentVolumeClaim = persistentVolumeClaim;
+    public Step template(String template) {
+        this.template = template;
+        return this;
+    }
+
+    /**
+     * Setter for when.
+     *
+     * @param when value
+     * @return this
+     */
+    public Step when(String when) {
+        this.when = when;
         return this;
     }
 }

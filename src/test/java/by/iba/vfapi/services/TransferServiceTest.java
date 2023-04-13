@@ -31,6 +31,8 @@ import by.iba.vfapi.dto.projects.ConnectDto;
 import by.iba.vfapi.dto.projects.ConnectionsDto;
 import by.iba.vfapi.exceptions.BadRequestException;
 import by.iba.vfapi.model.argo.*;
+import by.iba.vfapi.model.notifications.EmailNotification;
+import by.iba.vfapi.model.notifications.SlackNotification;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -543,9 +545,24 @@ class TransferServiceTest {
                                                                                                                                K8sUtils.CONFIGMAP)
                                                                                                                            .value(
                                                                                                                                "jobFromPipeline")))))))
-                                                            .pipelineParams(new PipelineParams()
-                                                                    .dependentPipelineIds(Set.of("13sdsd-32131"))
-                                                            ));
+                                                            .pipelineParams(
+                                                                    PipelineParams.builder()
+                                                                            .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                                                                            .slack(SlackNotification.builder()
+                                                                                    .successNotify(false)
+                                                                                    .failureNotify(false)
+                                                                                    .channels(List.of())
+                                                                                    .recipients(List.of())
+                                                                                    .build())
+                                                                            .email(EmailNotification.builder()
+                                                                                    .successNotify(false)
+                                                                                    .failureNotify(false)
+                                                                                    .recipients(List.of())
+                                                                                    .build())
+                                                                            .dependentPipelineIds(Set.of("pipelineId"))
+                                                                            .build()
+                                                            )
+        );
         WorkflowTemplate workflowTemplate2 = new WorkflowTemplate();
         workflowTemplate2.setMetadata(new ObjectMetaBuilder()
                                           .withName("pipelineId2")
@@ -564,8 +581,23 @@ class TransferServiceTest {
                                                                                                                                K8sUtils.CONFIGMAP)
                                                                                                                            .value(
                                                                                                                                "jobFromPipeline")))))))
-                                                            .pipelineParams(new PipelineParams()
-                                                                    .dependentPipelineIds(Set.of())));
+                                                            .pipelineParams(
+                                                                    PipelineParams.builder()
+                                                                            .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                                                                            .slack(SlackNotification.builder()
+                                                                                    .successNotify(false)
+                                                                                    .failureNotify(false)
+                                                                                    .channels(List.of())
+                                                                                    .recipients(List.of())
+                                                                                    .build())
+                                                                            .email(EmailNotification.builder()
+                                                                                    .successNotify(false)
+                                                                                    .failureNotify(false)
+                                                                                    .recipients(List.of())
+                                                                                    .build())
+                                                                            .dependentPipelineIds(Set.of())
+                                                                            .build()
+                                                            ));
 
         WorkflowTemplate workflowTemplate3 = new WorkflowTemplate();
         workflowTemplate3.setMetadata(new ObjectMetaBuilder()
@@ -585,8 +617,23 @@ class TransferServiceTest {
                                                                                                                                K8sUtils.CONFIGMAP)
                                                                                                                            .value(
                                                                                                                                "jobFromPipeline")))))))
-                                                            .pipelineParams(new PipelineParams()
-                                                                    .dependentPipelineIds(Set.of())));
+                                                            .pipelineParams(
+                                                                    PipelineParams.builder()
+                                                                            .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                                                                            .slack(SlackNotification.builder()
+                                                                                    .successNotify(false)
+                                                                                    .failureNotify(false)
+                                                                                    .channels(List.of())
+                                                                                    .recipients(List.of())
+                                                                                    .build())
+                                                                            .email(EmailNotification.builder()
+                                                                                    .successNotify(false)
+                                                                                    .failureNotify(false)
+                                                                                    .recipients(List.of())
+                                                                                    .build())
+                                                                            .dependentPipelineIds(Set.of("pipelineId"))
+                                                                            .build()
+                                                            ));
         List<WorkflowTemplate> workflowTemplates = new ArrayList<>();
         workflowTemplates.add(workflowTemplate1);
         when(argoKubernetesService.getAllWorkflowTemplates(anyString())).thenReturn(workflowTemplates);

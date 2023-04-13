@@ -16,7 +16,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package by.iba.vfapi.dto.projects;
 
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -41,7 +40,7 @@ import java.util.Set;
 public class ParamDataDto {
     @NotNull
     @Schema(description = "Parameter's value. Note that leading/trailing spaces will be removed automatically",
-            example = "sample text")
+    example = "sample text")
     private String text;
     @NotNull
     @Schema(description = "Parameter's usages in connections. Contains connections keys, in which the param is used.")

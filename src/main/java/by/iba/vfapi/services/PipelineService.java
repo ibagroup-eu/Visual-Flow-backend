@@ -19,6 +19,7 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.config.MailSenderConfig;
 import by.iba.vfapi.dao.PipelineHistoryRepository;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.dto.GraphDto;
@@ -52,10 +53,11 @@ import by.iba.vfapi.model.argo.PipelineParams;
 import by.iba.vfapi.model.argo.Resource;
 import by.iba.vfapi.model.argo.RuntimeData;
 import by.iba.vfapi.model.argo.SecretRef;
+import by.iba.vfapi.model.argo.Step;
 import by.iba.vfapi.model.argo.Template;
 import by.iba.vfapi.model.argo.TemplateMeta;
 import by.iba.vfapi.model.argo.ValueFrom;
-import by.iba.vfapi.model.argo.VolumeMount;
+import by.iba.vfapi.model.argo.VolumeMounts;
 import by.iba.vfapi.model.argo.Volumes;
 import by.iba.vfapi.model.argo.PersistentVolumeClaim;
 import by.iba.vfapi.model.argo.Workflow;
@@ -80,6 +82,7 @@ import io.argoproj.workflow.models.WorkflowSuspendRequest;
 import io.argoproj.workflow.models.WorkflowTerminateRequest;
 import io.fabric8.kubernetes.api.model.*;
 import io.fabric8.kubernetes.client.ResourceNotFoundException;
+
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -122,6 +125,7 @@ import static by.iba.vfapi.dto.Constants.PIPELINE_ID_LABEL;
 import static by.iba.vfapi.dto.Constants.NODE_NAME;
 import static by.iba.vfapi.dto.Constants.PIPELINE_HISTORY;
 import static by.iba.vfapi.dto.Constants.PIPELINE_NODE_HISTORY;
+import static by.iba.vfapi.dto.Constants.PIPELINE_NAME_LABEL;
 
 /**
  * PipelineService class.
@@ -150,7 +154,9 @@ public class PipelineService {
     private static final int DEPENDS_OPERATOR_LENGTH = 4;
     private static final String GRAPH_ID = "graphId";
     private static final String INPUT_PARAMETER_PATTERN = "{{inputs.parameters.%s}}";
-
+    private final String host;
+    private final String slackToken;
+    private final MailSenderConfig mailSenderConfig;
     private final String sparkImage;
     private final ArgoKubernetesService argoKubernetesService;
     private final ProjectService projectService;
@@ -164,16 +170,17 @@ public class PipelineService {
     private final AuthenticationService authenticationService;
     private final DependencyHandlerService dependencyHandlerService;
     private final PipelineHistoryRepository<? extends AbstractHistory> pipelineHistoryRepository;
-    @Value("${job.slack.apiToken}")
-    private String slackApiToken;
 
     public PipelineService(
         @Value("${job.spark.image}") String sparkImage,
         @Value("${job.spark.master}") final String jobMaster,
         @Value("${job.spark.serviceAccount}") final String serviceAccount,
         @Value("${job.imagePullSecret}") final String imagePullSecret,
-        @Value("${job.slack.image}") final String notificationImage,
         @Value("${pvc.mountPath}") final String pvcMountPath,
+        @Value("${server.host}") final String host,
+        @Value("${notifications.image}") final String notificationImage,
+        @Value("${notifications.slack.token}") final String slackToken,
+        MailSenderConfig mailSenderConfig,
         ArgoKubernetesService argoKubernetesService,
         ProjectService projService,
         WorkflowServiceApi apiInstance,
@@ -181,11 +188,14 @@ public class PipelineService {
         final AuthenticationService authenticationService,
         final DependencyHandlerService dependencyHandlerService,
         final PipelineHistoryRepository<? extends AbstractHistory> pipelineHistoryRepository) {
+        this.host = host;
+        this.notificationImage = notificationImage;
+        this.slackToken = slackToken;
+        this.mailSenderConfig = mailSenderConfig;
         this.sparkImage = sparkImage;
         this.jobMaster = jobMaster;
         this.serviceAccount = serviceAccount;
         this.imagePullSecret = imagePullSecret;
-        this.notificationImage = notificationImage;
         this.argoKubernetesService = argoKubernetesService;
         this.projectService = projService;
         this.apiInstance = apiInstance;
@@ -598,6 +608,70 @@ public class PipelineService {
         return new Template().name(Constants.DAG_TEMPLATE_NAME).dag(dagFlow);
     }
 
+    private Template createNotificationTemplate(
+            String notificationType,
+            String templateName,
+            String sendTo,
+            String mentionedUsers){
+        return new Template()
+                .name(templateName)
+                .inputs(new Inputs()
+                        .addParametersItem(new Parameter().name(Constants.NODE_NOTIFICATION_RECIPIENTS)
+                                .value(sendTo))
+                        .addParametersItem(new Parameter().name(Constants.NODE_NOTIFICATION_SUBJECT)
+                                .value(Constants.VF_NOTIFICATION_SUBJECT))
+                )
+                .container(new Container()
+                        .command(List.of("/bin/bash", "-c"))
+                        .args(List.of(
+                                String.format("java -jar /app/notification-service.jar" +
+                                              " %s" +                                 // notification type
+                                              " \"{{inputs.parameters.%s}}\"" +       // notification recipients
+                                              " \"{{inputs.parameters.%s}}\"" +       // notification subject
+                                              " \"%s\"" +                             // mentioned users
+                                              " \"{{workflow.name}}\"" +              // workflow name
+                                              " \"{{workflow.labels.%s}}\"" +         // workflow label
+                                              " \"{{workflow.namespace}}\"" +         // workflow namespace
+                                              " \"{{workflow.status}}\"" +            // workflow status
+                                              " \"{{workflow.creationTimestamp}}\"" + // workflow creation timestamp
+                                              " \"{{workflow.duration}}\"",           // workflow duration
+                                        notificationType,
+                                        Constants.NODE_NOTIFICATION_RECIPIENTS,
+                                        Constants.NODE_NOTIFICATION_SUBJECT,
+                                        mentionedUsers,
+                                        Constants.PIPELINE_NAME_LABEL)))
+                        .env(List.of(
+                                new Env().name("VF_HOST").value(host),
+                                new Env().name("SLACK_TOKEN").value(slackToken),
+                                new Env().name("EMAIL_ADDRESS").value(mailSenderConfig.getUsername()),
+                                new Env().name("EMAIL_PASS").value(mailSenderConfig.getPassword()),
+                                new Env().name("SMTP_HOST").value(mailSenderConfig.getHost()),
+                                new Env().name("SMTP_PORT").value(String.valueOf(mailSenderConfig.getPort())),
+                                new Env().name("SMTP_STARTTLS").value(mailSenderConfig
+                                        .getJavaMailProperties()
+                                        .getProperty("mail.smtp.starttls.enable")),
+                                new Env().name("SMTP_AUTH").value(mailSenderConfig
+                                        .getJavaMailProperties()
+                                        .getProperty("mail.smtp.auth"))))
+                        .envFrom(List.of(new EnvFrom().secretRef(new SecretRef().name(ParamsDto.SECRET_NAME))))
+                        .image(notificationImage)
+                        .imagePullPolicy("Always")
+                        .name(null)
+                        .resources(new ResourceRequirementsBuilder()
+                                .addToLimits(Map.of(Constants.CPU_FIELD,
+                                        Quantity.parse("500m"),
+                                        Constants.MEMORY_FIELD,
+                                        Quantity.parse("500M")))
+                                .addToRequests(Map.of(Constants.CPU_FIELD,
+                                        Quantity.parse("100m"),
+                                        Constants.MEMORY_FIELD,
+                                        Quantity.parse("100M")))
+                                .build()))
+                .metadata(new TemplateMeta().labels(Map.of(
+                        NODE_NAME, notificationType.toLowerCase() + "-notification",
+                        NODE_OPERATION, NODE_OPERATION_NOTIFICATION)));
+    }
+
     static List<DagTask> getDagTaskFromWorkflowTemplateSpec(WorkflowTemplateSpec workflowTemplateSpec) {
         List<Template> templates = workflowTemplateSpec.getTemplates();
         Template dagTemplate = templates
@@ -775,8 +849,8 @@ public class PipelineService {
                            .image(sparkImage)
                            .command(List.of("/opt/spark/work-dir/entrypoint.sh"))
                            .imagePullPolicy("Always")
-                           .volumeMount(List.of(new VolumeMount()
-                                   .name(K8sUtils.PVC_NAME)
+                           .volumeMounts(List.of(new VolumeMounts()
+                                   .name(K8sUtils.PVC_VOLUME_NAME)
                                    .mountPath(pvcMountPath))
                            )
                            .env(List.of(new Env()
@@ -812,7 +886,14 @@ public class PipelineService {
                                                         NODE_NAME,
                                                        "{{inputs.parameters.name}}",
                                                         NODE_OPERATION,
-                                                       "{{inputs.parameters.operation}}")));
+                                                       "{{inputs.parameters.operation}}")))
+            .volumes(List.of(new Volumes()
+                        .name(K8sUtils.PVC_VOLUME_NAME)
+                        .persistentVolumeClaim(
+                                new PersistentVolumeClaim()
+                                        .claimName(K8sUtils.PVC_NAME)
+                        ))
+            );
     }
 
     /**
@@ -878,7 +959,7 @@ public class PipelineService {
      *
      * @return Template for slack-job
      */
-    private Template createNotificationTemplate() {
+    private Template createSlackJobNotificationTemplate() {
         return new Template()
             .name(NOTIFICATION_TEMPLATE_NAME)
             .inputs(new Inputs()
@@ -898,7 +979,7 @@ public class PipelineService {
                                Constants.NODE_NOTIFICATION_MESSAGE,
                                Constants.NODE_NOTIFICATION_RECIPIENTS)))
                            .imagePullPolicy("Always")
-                           .env(List.of(new Env().name("SLACK_API_TOKEN").value(slackApiToken)))
+                           .env(List.of(new Env().name("SLACK_API_TOKEN").value(slackToken)))
                            .envFrom(List.of(new EnvFrom().secretRef(new SecretRef().name(ParamsDto.SECRET_NAME))))
                            .resources(new ResourceRequirementsBuilder()
                                           .addToLimits(Map.of(Constants.CPU_FIELD,
@@ -994,7 +1075,11 @@ public class PipelineService {
                 p.getValue().getSecret().getMetadata().getName())));
 
         List<Template> templates = new ArrayList<>();
-        templates.add(createNotificationTemplate());
+        templates.add(createSlackJobNotificationTemplate());
+        // Adding onExit template with the template names for notifications
+        templates.add(createExitHandlerTemplate(params));
+        // Adding notification templates into workflow template
+        addNotificationTemplates(templates, params);
         templates.add(createSparkTemplate(namespace));
         templates.add(createPipelineTemplate());
         templates.add(createContainerTemplate(false, false));
@@ -1006,15 +1091,89 @@ public class PipelineService {
         workflowTemplate.setSpec(new WorkflowTemplateSpec()
                                      .serviceAccountName(serviceAccount)
                                      .entrypoint(Constants.DAG_TEMPLATE_NAME)
+                                     .onExit(Constants.EXIT_HANDLER)
                                      .imagePullSecrets(pullSecrets)
                                      .templates(templates)
                                      .pipelineParams(params)
-                                     .volumes(List.of(new Volumes()
-                                             .name(K8sUtils.PVC_VOLUME_NAME)
-                                             .persistentVolumeClaim(
-                                                     new PersistentVolumeClaim()
-                                                             .claimName(K8sUtils.PVC_NAME)))
-                                     ));
+        );
+    }
+
+    /**
+     * Add notification templates to workflowTemplate according the conditions.
+     *
+     * @param templates        list of templates
+     * @param pipelineParams   pipeline parameters
+     */
+    private void addNotificationTemplates(List<Template> templates, PipelineParams pipelineParams) {
+        String emailRecipients = String.join(",", pipelineParams.getEmail().getRecipients());
+        String slackChannels = String.join(",", pipelineParams.getSlack().getChannels());
+        String slackRecipients = String.join(",", pipelineParams.getSlack().getRecipients());
+        if(pipelineParams.getEmail().getSuccessNotify()){
+            templates.add(createNotificationTemplate(
+                            Constants.EMAIL_NOTIFICATION,
+                            Constants.EMAIL_NOTIFY_SUCCESS,
+                            emailRecipients,
+                            "{{workflow.labels.startedBy}}"));
+        }
+        if(pipelineParams.getEmail().getFailureNotify()) {
+            templates.add(createNotificationTemplate(
+                            Constants.EMAIL_NOTIFICATION,
+                            Constants.EMAIL_NOTIFY_FAILURE,
+                            emailRecipients,
+                            "{{workflow.labels.startedBy}}"));
+        }
+        if(pipelineParams.getSlack().getSuccessNotify()){
+            templates.add(createNotificationTemplate(
+                    Constants.SLACK_NOTIFICATION,
+                    Constants.SLACK_NOTIFY_SUCCESS,
+                    slackChannels,
+                    slackRecipients));
+        }
+        if(pipelineParams.getSlack().getFailureNotify()) {
+            templates.add(createNotificationTemplate(
+                    Constants.SLACK_NOTIFICATION,
+                    Constants.SLACK_NOTIFY_FAILURE,
+                    slackChannels,
+                    slackRecipients));
+        }
+    }
+
+    /**
+     * Set onExit notification handler to workflowTemplate.
+     *
+     * @param params pipeline parameters
+     * @return template
+     */
+    private Template createExitHandlerTemplate(PipelineParams params) {
+        return new Template()
+                .name(Constants.EXIT_HANDLER)
+                .inputs(new Inputs()
+                        .addParametersItem(new Parameter().name(Constants.EMAIL_NOTIFY_SUCCESS)
+                                .value(params.getEmail().getSuccessNotify() ? "true": "false"))
+                        .addParametersItem(new Parameter().name(Constants.EMAIL_NOTIFY_FAILURE)
+                                .value(params.getEmail().getFailureNotify() ? "true": "false"))
+                        .addParametersItem(new Parameter().name(Constants.SLACK_NOTIFY_SUCCESS)
+                                .value(params.getSlack().getSuccessNotify() ? "true": "false"))
+                        .addParametersItem(new Parameter().name(Constants.SLACK_NOTIFY_FAILURE)
+                                .value(params.getSlack().getFailureNotify() ? "true": "false"))
+                )
+                .steps(List.of(List.of(
+                        new Step().name(Constants.EMAIL_NOTIFY_SUCCESS)
+                                .template(Constants.EMAIL_NOTIFY_SUCCESS)
+                                .when(String.format("{{workflow.status}} == Succeeded &&" +
+                                        " {{inputs.parameters.%s}} == true", Constants.EMAIL_NOTIFY_SUCCESS)),
+                        new Step().name(Constants.EMAIL_NOTIFY_FAILURE)
+                                .template(Constants.EMAIL_NOTIFY_FAILURE)
+                                .when(String.format("{{workflow.status}} != Succeeded &&" +
+                                        " {{inputs.parameters.%s}} == true", Constants.EMAIL_NOTIFY_FAILURE)),
+                        new Step().name(Constants.SLACK_NOTIFY_SUCCESS)
+                                .template(Constants.SLACK_NOTIFY_SUCCESS)
+                                .when(String.format("{{workflow.status}} == Succeeded &&" +
+                                        " {{inputs.parameters.%s}} == true", Constants.SLACK_NOTIFY_SUCCESS)),
+                        new Step().name(Constants.SLACK_NOTIFY_FAILURE)
+                                .template(Constants.SLACK_NOTIFY_FAILURE)
+                                .when(String.format("{{workflow.status}} != Succeeded &&" +
+                                        " {{inputs.parameters.%s}} == true", Constants.SLACK_NOTIFY_FAILURE)))));
     }
 
     /**
@@ -1025,12 +1184,14 @@ public class PipelineService {
      * @param func function for updating pipeline ids
      */
     private void updatePipelineDependency(String projectId,
-                                          String targetPipelineId, Function<PipelineParams, Set<String>> func) {
+                                          String targetPipelineId,
+                                          Function<PipelineParams,
+                                          Set<String>> func) {
         WorkflowTemplate workflowTemplate =
                 argoKubernetesService.getWorkflowTemplate(projectId, targetPipelineId);
         PipelineParams pipelineParams = workflowTemplate.getSpec().getPipelineParams();
         Set<String> nodePipelineIds = func.apply(pipelineParams);
-        workflowTemplate.getSpec().setPipelineParams(pipelineParams.dependentPipelineIds(nodePipelineIds));
+        workflowTemplate.getSpec().getPipelineParams().setDependentPipelineIds(nodePipelineIds);
         argoKubernetesService.createOrReplaceWorkflowTemplate(projectId, workflowTemplate);
     }
 
@@ -1476,6 +1637,7 @@ public class PipelineService {
             .withName(id)
             .addToLabels(Constants.TYPE, Constants.TYPE_PIPELINE)
             .addToLabels(Constants.STARTED_BY, authenticationService.getUserInfo().getUsername())
+            .addToLabels(Constants.PIPELINE_NAME_LABEL, workflowTemplate.getMetadata().getLabels().get("name"))
             .build()
         );
         workflow.setSpec(new WorkflowSpec().workflowTemplateRef(new WorkflowTemplateRef().name(id)));

@@ -26,6 +26,7 @@ server:
     key-store-type: pkcs12                        # store type
     key-alias: vf-key                             # name of key in p12 store file
     key-password: ${KEYSTORE_PASS}                # password for key in p12 store file
+  host: ${HOST}                                   # host at which the application will be running
   port: 8080                                      # port at which the application will be running
   tomcat:
     accesslog:
@@ -41,6 +42,7 @@ db-service:
 oauth:
   url:
     userInfo: ${USERINFO_ENDPOINT}                # URL pointing to userInfo endpoint on oauth server (for ex. Github: https://api.github.com/user, Keycloak: {ADDRESS}/auth/realms/{REALM}/protocol/openid-connect/userinfo)
+  provider: github                                # OAuth provider (it is used only in error messages).
 # map between userInfo fields and json data from auth server(in our case from oauth server)
 # in case some of the data is hidden behind multiple JSON objects, use dot . to go deeper into object hierarchy, i.e. auth.email: personal.info.email
 auth:
@@ -54,9 +56,9 @@ superusers:
     # - github-nickname1
     # - nickname2
 notifications:
+  image:                                          # docker image in format repository:tag
   slack:
-    botToken: ${BOT_TOKEN}
-    channelName:
+    token: ${TOKEN}                               # API token for slack app
   mail:
     default-encoding: UTF-8                       # Default-encoding
     host: smtp.gmail.com                          # An IP address or FQDN of the SMTP server
@@ -97,9 +99,6 @@ job:
     image:                                        # path to spark docker image in format repository:tag
     serviceAccount:                               # spark user service account. Backend copies this user to each new namespace(app project)
     roleBinding:                                  # role binding for spark user. Backend copies this role binding to each new namespace(app project)
-  slack:
-    image:                                        # path to slack docker image in format repository:tag
-    apiToken: ${SLACK_API_TOKEN}                  # API token for slack app
 argo:
   serverUrl: ${ARGO_SERVER_URL}                   # URL of argo server connected to Kubernetes
   limits:                                         # limits resource quota for argo executor

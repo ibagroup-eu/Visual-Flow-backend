@@ -34,12 +34,10 @@ import org.apache.commons.codec.binary.Base64;
 import org.springframework.boot.json.JsonParseException;
 import org.springframework.stereotype.Service;
 
-
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Map;
-
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -92,38 +90,32 @@ public class DependencyHandlerService {
         Set<GraphDto.NodeDto> newNodes = getNodesByDefinition(newDefinition);
         Set<GraphDto.NodeDto> oldNodes = getNodesByDefinition(oldDefinition);
 
-        Set<GraphDto.NodeDto> filteredNewNodes = newNodes
-                .stream()
-                .filter(node -> !oldNodes
-                        .stream()
-                        .map(nodeDto -> nodeDto.getValue().get(Constants.NODE_JOB_ID))
-                        .collect(Collectors.toSet())
-                        .contains(node.getValue().get(Constants.NODE_JOB_ID)))
-                .filter(node -> !oldNodes
-                        .stream()
-                        .map(nodeDto -> nodeDto.getValue().get(Constants.NODE_PIPELINE_ID))
-                        .collect(Collectors.toSet())
-                        .contains(node.getValue().get(Constants.NODE_PIPELINE_ID)))
+        deleteDependencies(projectId, id, filterSet(oldNodes, newNodes));
+
+        addDependencies(projectId, id, filterSet(newNodes, oldNodes));
+
+    }
+
+    /**
+     * Method returns values which exist in the 1st set and absent in the 2nd one
+     *
+     * @param set1 the first set
+     * @param set2 the second set
+     * @return result node dto set
+     */
+    private Set<GraphDto.NodeDto> filterSet(Set<GraphDto.NodeDto> set1, Set<GraphDto.NodeDto> set2){
+        return set1.stream()
+                .filter(node -> !(node.getValue().get(Constants.NODE_JOB_ID) != null &&
+                        set2.stream()
+                                .map(nodeDto -> nodeDto.getValue().get(Constants.NODE_JOB_ID))
+                                .collect(Collectors.toSet())
+                                .contains(node.getValue().get(Constants.NODE_JOB_ID))))
+                .filter(node -> !(node.getValue().get(Constants.NODE_PIPELINE_ID) != null &&
+                        set2.stream()
+                                .map(nodeDto -> nodeDto.getValue().get(Constants.NODE_PIPELINE_ID))
+                                .collect(Collectors.toSet())
+                                .contains(node.getValue().get(Constants.NODE_PIPELINE_ID))))
                 .collect(Collectors.toSet());
-
-        Set<GraphDto.NodeDto> filteredOldNodes = oldNodes
-                .stream()
-                .filter(node -> !newNodes
-                        .stream()
-                        .map(nodeDto -> nodeDto.getValue().get(Constants.NODE_JOB_ID))
-                        .collect(Collectors.toSet())
-                        .contains(node.getValue().get(Constants.NODE_JOB_ID)))
-                .filter(node -> !newNodes
-                        .stream()
-                        .map(nodeDto -> nodeDto.getValue().get(Constants.NODE_PIPELINE_ID))
-                        .collect(Collectors.toSet())
-                        .contains(node.getValue().get(Constants.NODE_PIPELINE_ID)))
-                .collect(Collectors.toSet());
-
-        deleteDependencies(projectId, id, filteredOldNodes);
-
-        addDependencies(projectId, id, filteredNewNodes);
-
     }
 
     /**
@@ -220,7 +212,7 @@ public class DependencyHandlerService {
         PipelineParams pipelineParams = workflowTemplate.getSpec().getPipelineParams();
         Set<String> pipelineIDs = checkIfPipelineDependsExist(pipelineParams);
         pipelineIDs.add(pipelineId);
-        workflowTemplate.getSpec().setPipelineParams(pipelineParams.dependentPipelineIds(pipelineIDs));
+        workflowTemplate.getSpec().getPipelineParams().setDependentPipelineIds(pipelineIDs);
         argoKubernetesService.createOrReplaceWorkflowTemplate(projectId, workflowTemplate);
         LOGGER.info(
                 "Pipeline dependency {} has been added to the pipeline {}",
@@ -243,7 +235,7 @@ public class DependencyHandlerService {
         pipelineIDs = pipelineIDs.stream()
                 .filter(id -> !pipelineId.equals(id))
                 .collect(Collectors.toSet());
-        workflowTemplate.getSpec().setPipelineParams(pipelineParams.dependentPipelineIds(pipelineIDs));
+        workflowTemplate.getSpec().getPipelineParams().setDependentPipelineIds(pipelineIDs);
         argoKubernetesService.createOrReplaceWorkflowTemplate(projectId, workflowTemplate);
         LOGGER.info(
                 "Pipeline dependency {} has been removed from the pipeline {}",

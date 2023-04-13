@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022 IBA Group, a.s. All rights reserved.
+ * Copyright (c) 2021 IBA Group, a.s. All rights reserved.
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -17,22 +17,17 @@
  * limitations under the License.
  */
 
-package by.iba.vfapi.model.argo;
+package by.iba.vfapi.model.notifications;
 
-import org.junit.jupiter.api.Test;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.NoArgsConstructor;
+import lombok.experimental.SuperBuilder;
 
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-
-public class VolumeMountTest {
-
-    @Test
-    public void testEquals() {
-        VolumeMounts first_obj = new VolumeMounts();
-        first_obj.setName("name");
-        first_obj.setMountPath("path");
-        VolumeMounts second_obj = new VolumeMounts();
-        second_obj.setName("name");
-        second_obj.setMountPath("other path");
-        assertNotEquals(first_obj, second_obj, "Objects must not be equal!");
-    }
+@Getter
+@Setter
+@SuperBuilder
+@NoArgsConstructor
+public class EmailNotification extends Notification {
+    private static final long serialVersionUID = 1;
 }

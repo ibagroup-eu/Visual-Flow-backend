@@ -29,6 +29,7 @@ import by.iba.vfapi.model.argo.Workflow;
 import by.iba.vfapi.model.history.PipelineNodeHistory;
 import by.iba.vfapi.services.K8sUtils;
 import by.iba.vfapi.services.KubernetesService;
+import by.iba.vfapi.services.PipelineService;
 import io.fabric8.kubernetes.client.Watcher;
 import io.fabric8.kubernetes.client.WatcherException;
 import lombok.extern.slf4j.Slf4j;
@@ -76,16 +77,28 @@ public class WorkflowWatcher implements Watcher<Workflow> {
         WorkflowStatus workflowStatus = workflow.getStatus();
         if (workflowStatus != null && List.of(K8sUtils.FAILED_STATUS,
                                               K8sUtils.SUCCEEDED_STATUS).contains(workflowStatus.getPhase())) {
+
+            List<String> validTemplates = List.of(
+                    PipelineService.SPARK_TEMPLATE_NAME, PipelineService.PIPELINE_TEMPLATE_NAME,
+                    PipelineService.NOTIFICATION_TEMPLATE_NAME, PipelineService.CONTAINER_TEMPLATE_NAME,
+                    PipelineService.CONTAINER_WITH_CMD_TEMPLATE_NAME,
+                    PipelineService.CONTAINER_TEMPLATE_WITH_PROJECT_PARAMS_NAME,
+                    PipelineService.CONTAINER_WITH_CMD_AND_PROJECT_PARAMS_TEMPLATE_NAME,
+                    Constants.EMAIL_NOTIFY_SUCCESS, Constants.EMAIL_NOTIFY_FAILURE,
+                    Constants.SLACK_NOTIFY_SUCCESS, Constants.SLACK_NOTIFY_FAILURE);
+
             List<String> workflowNodes = workflowStatus
                     .getNodes()
-                    .keySet()
+                    .entrySet()
                     .stream()
-                    .filter(k -> !k.equals(workflow.getMetadata().getName()) &&
-                                 List.of(K8sUtils.FAILED_STATUS,
-                                         K8sUtils.SUCCEEDED_STATUS).contains(
-                                                 workflowStatus.getNodes().get(k).getPhase()
-                                 )
-            ).collect(Collectors.toList());
+                    .filter(nodes -> !nodes.getKey().equals(workflow.getMetadata().getName()))
+                    .filter(nodes -> List.of(K8sUtils.FAILED_STATUS,
+                                             K8sUtils.SUCCEEDED_STATUS,
+                                             K8sUtils.ERROR_STATUS).contains(nodes.getValue().getPhase()))
+                    .filter(nodes -> nodes.getValue().getTemplateName() != null &&
+                                     validTemplates.contains(nodes.getValue().getTemplateName())
+                    ).map(Map.Entry::getKey)
+                    .collect(Collectors.toList());
 
             String hashKey = String.valueOf(workflow.getStatus().getStartedAt().getMillis());
             String key = String.format("%s:%s_%s",

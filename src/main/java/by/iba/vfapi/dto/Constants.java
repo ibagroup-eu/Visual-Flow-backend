@@ -24,7 +24,7 @@ import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
 /**
- * Constants class.
+ * Class for constants.
  */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class Constants {
@@ -54,6 +54,7 @@ public final class Constants {
     public static final String CRON_WORKFLOW_POD_LABEL = "workflows.argoproj.io/cron-workflow";
     public static final String PIPELINE_JOB_ID_LABEL = "pipelineJobId";
     public static final String PIPELINE_ID_LABEL = "pipelineId";
+    public static final String PIPELINE_NAME_LABEL = "pipelineName";
     public static final String NOT_PIPELINE_FLAG = "notPipeline";
 
     public static final String LIMITS_CPU = "limits.cpu";
@@ -80,7 +81,14 @@ public final class Constants {
     public static final String DRIVER_REQUEST_CORES_VALUE = "100m";
     public static final double MEMORY_OVERHEAD_FACTOR = 1.1;
     public static final String DAG_TEMPLATE_NAME = "dagTemplate";
-
+    public static final String VF_NOTIFICATION_SUBJECT = "Visual Flow Pipeline Notification";
+    public static final String EXIT_HANDLER = "exit-handler";
+    public static final String EMAIL_NOTIFICATION = "EMAIL";
+    public static final String EMAIL_NOTIFY_SUCCESS = "email-notify-success";
+    public static final String EMAIL_NOTIFY_FAILURE = "email-notify-failure";
+    public static final String SLACK_NOTIFICATION = "SLACK";
+    public static final String SLACK_NOTIFY_SUCCESS = "slack-notify-success";
+    public static final String SLACK_NOTIFY_FAILURE = "slack-notify-failure";
     public static final String UPDATE_ACTION = "update";
     public static final String CREATE_ACTION = "create";
 
@@ -113,6 +121,8 @@ public final class Constants {
     public static final String NODE_START_COMMAND = "command";
     public static final String NODE_MOUNT_PROJECT_PARAMS = "mountProjectParams";
     public static final String NODE_NOTIFICATION_RECIPIENTS = "addressees";
+
+    public static final String NODE_NOTIFICATION_SUBJECT = "subject";
     public static final String NODE_NOTIFICATION_MESSAGE = "message";
     public static final String KIND_JOB = "Job";
     public static final String KIND_PIPELINE = "Pipeline";
@@ -123,6 +133,7 @@ public final class Constants {
     public static final String TOKEN = "token";
     public static final String DOCKERCFG = "dockercfg";
     public static final String STARTED_BY = "startedBy";
+    public static final String USER_FULL_NAME = "userFullName";
     public static final String PIPELINE_HISTORY = "pipeline_history";
     public static final String PIPELINE_NODE_HISTORY = "pipeline_node_history";
     public static final String LOGS = "logs";

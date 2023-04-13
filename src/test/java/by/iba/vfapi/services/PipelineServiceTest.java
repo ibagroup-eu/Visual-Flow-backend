@@ -19,6 +19,7 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.config.MailSenderConfig;
 import by.iba.vfapi.dao.PipelineHistoryRepository;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.dto.history.PipelineHistoryResponseDto;
@@ -48,6 +49,8 @@ import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.model.history.AbstractHistory;
 import by.iba.vfapi.model.history.PipelineHistory;
 import by.iba.vfapi.model.history.PipelineNodeHistory;
+import by.iba.vfapi.model.notifications.EmailNotification;
+import by.iba.vfapi.model.notifications.SlackNotification;
 import by.iba.vfapi.services.auth.AuthenticationService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -75,9 +78,11 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedList;
-import java.util.HashSet;
 import java.util.HashMap;
 import java.util.stream.Collectors;
+import java.util.Set;
+import java.util.stream.Stream;
+
 import org.apache.commons.codec.binary.Base64;
 import org.joda.time.DateTime;
 import org.junit.jupiter.api.BeforeEach;
@@ -103,7 +108,6 @@ import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.times;
 
 @ExtendWith(MockitoExtension.class)
 class PipelineServiceTest {
@@ -192,6 +196,16 @@ class PipelineServiceTest {
     @Mock
     private WorkflowServiceApi apiInstance;
     private PipelineService pipelineService;
+
+    private final MailSenderConfig mailSenderConfig = new MailSenderConfig("username",
+            "password",
+            "smtp",
+            "host",
+            587,
+            "true",
+            "auth",
+            "test",
+            "true");
     @Mock
     private PipelineHistoryRepository<? extends AbstractHistory> pipelineHistoryRepository;
 
@@ -201,8 +215,11 @@ class PipelineServiceTest {
             "sparkMaster",
             "spark",
             "pullSecret",
-            "slackImage",
             "pvcMountPath",
+            "host",
+            "notificationImage",
+            "botToken",
+            mailSenderConfig,
             argoKubernetesService,
             projectService,
             apiInstance,
@@ -226,11 +243,22 @@ class PipelineServiceTest {
         when(argoKubernetesService.getConfigMap(anyString(), anyString())).thenReturn(configMap);
         when(projectService.getParams(anyString())).thenReturn(ParamsDto.fromSecret(new Secret()).build());
 
-        pipelineService.create("projectId", "name", GRAPH, new PipelineParams()
-                .successNotify(true)
-                .failureNotify(false)
-                .recipients(Arrays.asList("JaneDoe", "DoeJane"))
-                .tags(Arrays.asList("VF-Demo", "VF-Migration")));
+        pipelineService.create("projectId", "name", GRAPH,
+                PipelineParams.builder()
+                    .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                    .slack(SlackNotification.builder()
+                            .successNotify(false)
+                            .failureNotify(false)
+                            .channels(List.of())
+                            .recipients(List.of())
+                            .build())
+                    .email(EmailNotification.builder()
+                            .successNotify(true)
+                            .failureNotify(false)
+                            .recipients(List.of("test@test.com"))
+                            .build())
+                    .dependentPipelineIds(Set.of())
+                .build());
 
         verify(argoKubernetesService).createOrReplaceWorkflowTemplate(anyString(), any(WorkflowTemplate.class));
     }
@@ -263,8 +291,23 @@ class PipelineServiceTest {
                 .build());
 
         workflowTemplate.setSpec(new WorkflowTemplateSpec()
-                .pipelineParams(new PipelineParams()
-                        .dependentPipelineIds(new HashSet<>()))
+                .pipelineParams(
+                        PipelineParams.builder()
+                                .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                                .slack(SlackNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .channels(List.of())
+                                        .recipients(List.of())
+                                        .build())
+                                .email(EmailNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .recipients(List.of())
+                                        .build())
+                                .dependentPipelineIds(Set.of())
+                                .build()
+                )
                 .templates(List.of(new Template()
                         .name(Constants.DAG_TEMPLATE_NAME)
                         .dag(new DagTemplate()))));
@@ -278,11 +321,22 @@ class PipelineServiceTest {
         when(argoKubernetesService.isWorkflowTemplateExist(anyString(), anyString())).thenReturn(true);
         when(projectService.getParams(anyString())).thenReturn(ParamsDto.fromSecret(new Secret()).build());
 
-        pipelineService.create("projectId", "name", GRAPH_PIPELINE, new PipelineParams()
-                .successNotify(true)
-                .failureNotify(false)
-                .recipients(Arrays.asList("JaneDoe", "DoeJane"))
-                .tags(Arrays.asList("VF-Demo", "VF-Migration")));
+        pipelineService.create("projectId", "name", GRAPH_PIPELINE,
+                PipelineParams.builder()
+                        .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                        .slack(SlackNotification.builder()
+                                .successNotify(false)
+                                .failureNotify(false)
+                                .channels(List.of())
+                                .recipients(List.of())
+                                .build())
+                        .email(EmailNotification.builder()
+                                .successNotify(true)
+                                .failureNotify(true)
+                                .recipients(List.of("test@test.com"))
+                                .build())
+                        .dependentPipelineIds(Set.of())
+                        .build());
 
         verify(argoKubernetesService).createOrReplaceWorkflowTemplate(anyString(),
                 any(WorkflowTemplate.class));
@@ -329,11 +383,21 @@ class PipelineServiceTest {
                                                                "        \"id\": \"2\",\n" +
                                                                "        \"vertex\": true\n" +
                                                                "      }]}"),
-                new PipelineParams()
-                .successNotify(true)
-                .failureNotify(false)
-                .recipients(Arrays.asList("JaneDoe", "DoeJane"))
-                .tags(Arrays.asList("VF-Demo", "VF-Migration")));
+                    PipelineParams.builder()
+                        .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                        .slack(SlackNotification.builder()
+                                .successNotify(false)
+                                .failureNotify(false)
+                                .channels(List.of())
+                                .recipients(List.of())
+                                .build())
+                        .email(EmailNotification.builder()
+                                .successNotify(true)
+                                .failureNotify(false)
+                                .recipients(List.of("test@test.com"))
+                                .build())
+                        .dependentPipelineIds(Set.of())
+                        .build());
 
         verify(argoKubernetesService).createOrReplaceWorkflowTemplate(anyString(), any(WorkflowTemplate.class));
     }
@@ -382,11 +446,21 @@ class PipelineServiceTest {
                                                                "        \"id\": \"2\",\n" +
                                                                "        \"vertex\": true\n" +
                                                                "      }]}"),
-                new PipelineParams()
-                        .successNotify(true)
-                        .failureNotify(false)
-                        .recipients(Arrays.asList("JaneDoe", "DoeJane"))
-                        .tags(Arrays.asList("VF-Demo", "VF-Migration")));
+                    PipelineParams.builder()
+                        .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                        .slack(SlackNotification.builder()
+                                .successNotify(false)
+                                .failureNotify(false)
+                                .channels(List.of())
+                                .recipients(List.of())
+                                .build())
+                        .email(EmailNotification.builder()
+                                .successNotify(false)
+                                .failureNotify(false)
+                                .recipients(List.of())
+                                .build())
+                        .dependentPipelineIds(Set.of())
+                        .build());
 
         verify(argoKubernetesService).createOrReplaceWorkflowTemplate(anyString(), any(WorkflowTemplate.class));
     }
@@ -440,11 +514,21 @@ class PipelineServiceTest {
                                                                "        \"id\": \"2\",\n" +
                                                                "        \"vertex\": true\n" +
                                                                "      }]}"),
-                new PipelineParams()
-                        .successNotify(true)
-                        .failureNotify(false)
-                        .recipients(Arrays.asList("JaneDoe", "DoeJane"))
-                        .tags(Arrays.asList("VF-Demo", "VF-Migration")));
+                    PipelineParams.builder()
+                        .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                        .slack(SlackNotification.builder()
+                                .successNotify(false)
+                                .failureNotify(false)
+                                .channels(List.of())
+                                .recipients(List.of())
+                                .build())
+                        .email(EmailNotification.builder()
+                                .successNotify(false)
+                                .failureNotify(false)
+                                .recipients(List.of())
+                                .build())
+                        .dependentPipelineIds(Set.of())
+                        .build());
 
         verify(argoKubernetesService).createOrReplaceWorkflowTemplate(anyString(), any(WorkflowTemplate.class));
     }
@@ -499,11 +583,21 @@ class PipelineServiceTest {
                                                                "        \"id\": \"2\",\n" +
                                                                "        \"vertex\": true\n" +
                                                                "      }]}"),
-                new PipelineParams()
-                        .successNotify(true)
-                        .failureNotify(false)
-                        .recipients(Arrays.asList("JaneDoe", "DoeJane"))
-                        .tags(Arrays.asList("VF-Demo", "VF-Migration")));
+                    PipelineParams.builder()
+                        .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                        .slack(SlackNotification.builder()
+                                .successNotify(true)
+                                .failureNotify(false)
+                                .channels(List.of("#test"))
+                                .recipients(List.of("test_user"))
+                                .build())
+                        .email(EmailNotification.builder()
+                                .successNotify(false)
+                                .failureNotify(false)
+                                .recipients(List.of())
+                                .build())
+                        .dependentPipelineIds(Set.of())
+                        .build());
 
         verify(argoKubernetesService).createOrReplaceWorkflowTemplate(anyString(), any(WorkflowTemplate.class));
     }
@@ -515,11 +609,22 @@ class PipelineServiceTest {
                                                                        "name"))).thenReturn(List.of(new WorkflowTemplate(),
                                                                                                     new WorkflowTemplate()));
         assertThrows(BadRequestException.class,
-                     () -> pipelineService.create("projectId", "name", GRAPH, new PipelineParams()
-                                     .successNotify(true)
-                                     .failureNotify(false)
-                                     .recipients(Arrays.asList("JaneDoe", "DoeJane"))
-                                     .tags(Arrays.asList("VF-Demo", "VF-Migration"))),
+                     () -> pipelineService.create("projectId", "name", GRAPH,
+                             PipelineParams.builder()
+                                     .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                                     .slack(SlackNotification.builder()
+                                             .successNotify(false)
+                                             .failureNotify(false)
+                                             .channels(List.of())
+                                             .recipients(List.of())
+                                             .build())
+                                     .email(EmailNotification.builder()
+                                             .successNotify(false)
+                                             .failureNotify(false)
+                                             .recipients(List.of())
+                                             .build())
+                                     .dependentPipelineIds(Set.of())
+                                     .build()),
                      "Expected exception must be thrown");
 
 
@@ -615,12 +720,23 @@ class PipelineServiceTest {
                                          .name("pipeline-2681521834")
                                          .template("notificationTemplate")));
         workflowTemplate.setSpec(new WorkflowTemplateSpec()
-                .pipelineParams(new PipelineParams()
-                        .failureNotify(false)
-                        .successNotify(false)
-                        .recipients(Collections.emptyList())
-                        .tags(List.of("value1"))
-                        .dependentPipelineIds(List.of("")))
+                .pipelineParams(
+                        PipelineParams.builder()
+                                .tags(List.of("value1"))
+                                .slack(SlackNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .channels(List.of())
+                                        .recipients(List.of())
+                                        .build())
+                                .email(EmailNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .recipients(List.of())
+                                        .build())
+                                .dependentPipelineIds(Set.of())
+                                .build()
+                )
                 .templates(List.of(new Template()
                         .name("dagTemplate")
                         .dag(dagTemplate))));
@@ -681,7 +797,7 @@ class PipelineServiceTest {
             .cron(false)
             .runnable(true)
             .jobsStatuses(Map.of("1", "Running", "2", "Pending"))
-            .dependentPipelineIds(List.of(""))
+            .dependentPipelineIds(List.of())
             .tags(List.of("value1"));
 
         assertEquals(expected, pipelines.getPipelines().get(0), "Pipeline must be equals to expected");
@@ -713,12 +829,23 @@ class PipelineServiceTest {
                                          .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
                                          .build());
         workflowTemplate.setSpec(new WorkflowTemplateSpec()
-                .pipelineParams(new PipelineParams()
-                        .failureNotify(false)
-                        .successNotify(false)
-                        .recipients(Collections.emptyList())
-                        .tags(List.of("value1"))
-                        .dependentPipelineIds(List.of("")))
+                .pipelineParams(
+                        PipelineParams.builder()
+                                .tags(List.of("value1"))
+                                .slack(SlackNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .channels(List.of())
+                                        .recipients(List.of())
+                                        .build())
+                                .email(EmailNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .recipients(List.of())
+                                        .build())
+                                .dependentPipelineIds(Set.of())
+                                .build()
+                )
                 .templates(List.of(new Template()
                         .name("dagTemplate")
                         .dag(dagTemplate))));
@@ -745,9 +872,8 @@ class PipelineServiceTest {
         nodeStatus2.setFinishedAt(DateTime.parse("2021-10-28T07:37:46Z"));
         nodeStatus2.setTemplateName("notificationTemplate");
         nodeStatus2.setType(NODE_TYPE_POD);
-        status.setNodes(List
+        status.setNodes(Stream
                             .of(nodeStatus1, nodeStatus2)
-                            .stream()
                             .collect(Collectors.toMap(NodeStatus::getDisplayName, ns -> ns)));
         status.setStoredTemplates(Map.of("dagTemplate",
                                          new Template()
@@ -787,7 +913,7 @@ class PipelineServiceTest {
             .cron(true)
             .cronSuspend(true)
             .tags(List.of("value1"))
-            .dependentPipelineIds(List.of(""));
+            .dependentPipelineIds(List.of());
 
         assertEquals(expected, pipelines.getPipelines().get(0), "Pipeline must be equals to expected");
         assertTrue(pipelines.isEditable(), "Must be true");
@@ -804,12 +930,23 @@ class PipelineServiceTest {
                                          .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
                                          .build());
         workflowTemplate.setSpec(new WorkflowTemplateSpec()
-                .pipelineParams(new PipelineParams()
-                        .failureNotify(false)
-                        .successNotify(false)
-                        .recipients(Collections.emptyList())
-                        .tags(List.of("value1"))
-                        .dependentPipelineIds(List.of("")))
+                .pipelineParams(
+                        PipelineParams.builder()
+                                .tags(List.of("value1"))
+                                .slack(SlackNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .channels(List.of())
+                                        .recipients(List.of())
+                                        .build())
+                                .email(EmailNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .recipients(List.of())
+                                        .build())
+                                .dependentPipelineIds(Set.of())
+                                .build()
+                )
                 .templates(List.of(new Template()
                         .name("dagTemplate")
                         .dag(new DagTemplate().addTasksItem(
@@ -838,7 +975,7 @@ class PipelineServiceTest {
             .cron(false)
             .runnable(true)
             .tags(List.of("value1"))
-            .dependentPipelineIds(List.of(""));
+            .dependentPipelineIds(List.of());
 
         assertEquals(expected, pipelines.getPipelines().get(0), "Pipeline must be equals to expected");
         assertTrue(pipelines.isEditable(), "Must be true");
@@ -863,8 +1000,23 @@ class PipelineServiceTest {
                         .name("dagTemplate")
                         .dag(new DagTemplate().addTasksItem(
                                 new DagTask()))))
-                .pipelineParams(new PipelineParams()
-                        .dependentPipelineIds(List.of("pl1"))));
+                .pipelineParams(
+                        PipelineParams.builder()
+                                .tags(List.of())
+                                .slack(SlackNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .channels(List.of())
+                                        .recipients(List.of())
+                                        .build())
+                                .email(EmailNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .recipients(List.of())
+                                        .build())
+                                .dependentPipelineIds(Set.of("pl1"))
+                                .build()
+                ));
         List<WorkflowTemplate> workflowTemplates = List.of(workflowTemplate);
 
         when(argoKubernetesService.getAllWorkflowTemplates("projectId")).thenReturn(workflowTemplates);
@@ -921,18 +1073,40 @@ class PipelineServiceTest {
                 .build());
 
         workflowTemplate.setSpec(new WorkflowTemplateSpec()
-                .pipelineParams(new PipelineParams()
-                        .dependentPipelineIds(null))
+                .pipelineParams(PipelineParams.builder()
+                        .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                        .slack(SlackNotification.builder()
+                                .successNotify(false)
+                                .failureNotify(false)
+                                .channels(List.of())
+                                .recipients(List.of())
+                                .build())
+                        .email(EmailNotification.builder()
+                                .successNotify(false)
+                                .failureNotify(false)
+                                .recipients(List.of())
+                                .build())
+                        .dependentPipelineIds(Set.of())
+                        .build())
                 .templates(List.of(new Template()
                         .name(Constants.DAG_TEMPLATE_NAME)
                         .dag(new DagTemplate()))));
 
-        PipelineParams params =  new PipelineParams()
-                .successNotify(true)
-                .failureNotify(false)
-                .recipients(Arrays.asList("JaneDoe", "DoeJane"))
+        PipelineParams params =  PipelineParams.builder()
                 .tags(Arrays.asList("VF-Demo", "VF-Migration"))
-                .dependentPipelineIds(List.of("pl2", "pl3"));
+                .slack(SlackNotification.builder()
+                        .successNotify(false)
+                        .failureNotify(false)
+                        .channels(List.of())
+                        .recipients(List.of())
+                        .build())
+                .email(EmailNotification.builder()
+                        .successNotify(false)
+                        .failureNotify(false)
+                        .recipients(List.of())
+                        .build())
+                .dependentPipelineIds(Set.of())
+                .build();
 
         pipelineService.update("projectId", "id", GRAPH, params, "newName");
 
@@ -976,18 +1150,42 @@ class PipelineServiceTest {
                 .build());
 
         workflowTemplate.setSpec(new WorkflowTemplateSpec()
-                .pipelineParams(new PipelineParams()
-                        .dependentPipelineIds(null))
+                .pipelineParams(
+                        PipelineParams.builder()
+                                .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                                .slack(SlackNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .channels(List.of())
+                                        .recipients(List.of())
+                                        .build())
+                                .email(EmailNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .recipients(List.of())
+                                        .build())
+                                .dependentPipelineIds(Set.of())
+                                .build()
+                )
                 .templates(List.of(new Template()
                         .name(Constants.DAG_TEMPLATE_NAME)
                         .dag(new DagTemplate()))));
 
-        PipelineParams params = new PipelineParams()
-                .successNotify(true)
-                .failureNotify(false)
-                .recipients(Arrays.asList("JaneDoe", "DoeJane"))
+        PipelineParams params = PipelineParams.builder()
                 .tags(Arrays.asList("VF-Demo", "VF-Migration"))
-                .dependentPipelineIds(List.of("pl2", "pl3"));
+                .slack(SlackNotification.builder()
+                        .successNotify(false)
+                        .failureNotify(false)
+                        .channels(List.of())
+                        .recipients(List.of())
+                        .build())
+                .email(EmailNotification.builder()
+                        .successNotify(false)
+                        .failureNotify(false)
+                        .recipients(List.of())
+                        .build())
+                .dependentPipelineIds(Set.of())
+                .build();
 
         pipelineService.update("projectId", "id", GRAPH, params, "newName");
 
@@ -1007,8 +1205,23 @@ class PipelineServiceTest {
                 .build());
 
         workflowTemplate.setSpec(new WorkflowTemplateSpec()
-                .pipelineParams(new PipelineParams()
-                        .dependentPipelineIds(null))
+                .pipelineParams(
+                        PipelineParams.builder()
+                                .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                                .slack(SlackNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .channels(List.of())
+                                        .recipients(List.of())
+                                        .build())
+                                .email(EmailNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .recipients(List.of())
+                                        .build())
+                                .dependentPipelineIds(Set.of())
+                                .build()
+                )
                 .templates(List.of(new Template()
                         .name(Constants.DAG_TEMPLATE_NAME)
                         .dag(new DagTemplate()))));
@@ -1039,8 +1252,23 @@ class PipelineServiceTest {
                 .build());
 
         workflowTemplate.setSpec(new WorkflowTemplateSpec()
-                .pipelineParams(new PipelineParams()
-                        .dependentPipelineIds(List.of("pl2")))
+                .pipelineParams(
+                        PipelineParams.builder()
+                                .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                                .slack(SlackNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .channels(List.of())
+                                        .recipients(List.of())
+                                        .build())
+                                .email(EmailNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .recipients(List.of())
+                                        .build())
+                                .dependentPipelineIds(Set.of())
+                                .build()
+                )
                 .templates(List.of(new Template()
                         .name(Constants.DAG_TEMPLATE_NAME)
                         .dag(new DagTemplate()))));

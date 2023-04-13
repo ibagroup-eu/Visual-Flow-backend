@@ -25,6 +25,8 @@ import by.iba.vfapi.model.argo.PipelineParams;
 import by.iba.vfapi.model.argo.Template;
 import by.iba.vfapi.model.argo.WorkflowTemplate;
 import by.iba.vfapi.model.argo.WorkflowTemplateSpec;
+import by.iba.vfapi.model.notifications.EmailNotification;
+import by.iba.vfapi.model.notifications.SlackNotification;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -38,8 +40,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.util.HashSet;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -141,8 +142,23 @@ class DependencyHandlerServiceTest {
                 .build());
 
         workflowTemplate.setSpec(new WorkflowTemplateSpec()
-                .pipelineParams(new PipelineParams()
-                        .dependentPipelineIds(new HashSet<>()))
+                .pipelineParams(
+                        PipelineParams.builder()
+                                .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                                .slack(SlackNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .channels(List.of())
+                                        .recipients(List.of())
+                                        .build())
+                                .email(EmailNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .recipients(List.of())
+                                        .build())
+                                .dependentPipelineIds(Set.of())
+                                .build()
+                )
                 .templates(List.of(new Template()
                         .name(Constants.DAG_TEMPLATE_NAME)
                         .dag(new DagTemplate()))));
@@ -188,8 +204,23 @@ class DependencyHandlerServiceTest {
                 .build());
 
         workflowTemplate.setSpec(new WorkflowTemplateSpec()
-                .pipelineParams(new PipelineParams()
-                        .dependentPipelineIds(new HashSet<>()))
+                .pipelineParams(
+                        PipelineParams.builder()
+                                .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                                .slack(SlackNotification.builder()
+                                        .successNotify(false)
+                                        .failureNotify(false)
+                                        .channels(List.of())
+                                        .recipients(List.of())
+                                        .build())
+                                .email(EmailNotification.builder()
+                                        .successNotify(true)
+                                        .failureNotify(true)
+                                        .recipients(List.of("test@test.com"))
+                                        .build())
+                                .dependentPipelineIds(Set.of())
+                                .build()
+                )
                 .templates(List.of(new Template()
                         .name(Constants.DAG_TEMPLATE_NAME)
                         .dag(new DagTemplate()))));
@@ -241,8 +272,21 @@ class DependencyHandlerServiceTest {
                 .build());
 
         workflowTemplate.setSpec(new WorkflowTemplateSpec()
-                .pipelineParams(new PipelineParams()
-                        .dependentPipelineIds(Set.of("pl1")))
+                .pipelineParams(PipelineParams.builder()
+                        .tags(Arrays.asList("VF-Demo", "VF-Migration"))
+                        .slack(SlackNotification.builder()
+                                .successNotify(false)
+                                .failureNotify(false)
+                                .channels(List.of())
+                                .recipients(List.of())
+                                .build())
+                        .email(EmailNotification.builder()
+                                .successNotify(false)
+                                .failureNotify(false)
+                                .recipients(List.of())
+                                .build())
+                        .dependentPipelineIds(Set.of("pipelineId"))
+                        .build())
                 .templates(List.of(new Template()
                         .name(Constants.DAG_TEMPLATE_NAME)
                         .dag(new DagTemplate()))));

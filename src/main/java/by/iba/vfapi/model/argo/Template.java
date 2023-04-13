@@ -21,6 +21,10 @@ package by.iba.vfapi.model.argo;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -44,6 +48,8 @@ public class Template implements Serializable {
     private String name;
     private String podSpecPatch;
     private Resource resource;
+    private List<List<Step>> steps;
+    private List<Volumes> volumes;
 
     /**
      * Setter for podSpecPatch.
@@ -119,6 +125,32 @@ public class Template implements Serializable {
      */
     public Template resource(Resource resource) {
         this.resource = resource;
+        return this;
+    }
+
+    /**
+     * Setter for steps.
+     *
+     * @param steps steps
+     * @return this
+     */
+    public Template steps(Collection<List<Step>> steps) {
+        if (steps != null) {
+            this.steps = new ArrayList<>(steps);
+        }
+        return this;
+    }
+
+    /**
+     * Setter for volumes.
+     *
+     * @param volumes volumes
+     * @return this
+     */
+    public Template volumes(Collection<Volumes> volumes) {
+        if (volumes != null) {
+            this.volumes = new ArrayList<>(volumes);
+        }
         return this;
     }
 }

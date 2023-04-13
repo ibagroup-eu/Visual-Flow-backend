@@ -104,13 +104,14 @@ public class DatabasesController {
             description = "Get a connection ping status")
     @PostMapping("/{projectId}/connections")
     public ResponseEntity<PingStatusDto> ping(@PathVariable final String projectId,
-                                                        @RequestBody @Valid final ConnectDto connectionDto) {
+                                              @RequestBody @Valid final ConnectDto connectionDto) {
         LOGGER.info(
                 "{} - Receiving {} connection ping status for the '{}' project",
                 AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
                 connectionDto.getKey(),
                 projectId);
-        return restTemplate.postForEntity(dbServiceHost, connectionDto, PingStatusDto.class);
+        return restTemplate.postForEntity(dbServiceHost,
+                databaseService.replaceParams(projectId, connectionDto),
+                PingStatusDto.class);
     }
-
 }

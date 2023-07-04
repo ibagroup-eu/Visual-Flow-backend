@@ -156,7 +156,7 @@ class TransferServiceTest {
     @BeforeEach
     void setUp() {
         transferService = new TransferService(argoKubernetesService,
-                jobService, pipelineService, projectService, dependencyHandlerService);
+                jobService, pipelineService, projectService, "test");
     }
 
     @Test
@@ -438,8 +438,8 @@ class TransferServiceTest {
                               "1G",
                               Constants.DRIVER_MEMORY,
                               "1G",
-                              Constants.JOB_CONFIG_FIELD,
-                              "{\"nodes\":[], \"edges\":[]}"))
+                              Constants.JOB_CONFIG_PATH_FIELD,
+                              "test"))
             .withNewMetadata()
             .withName("jobId1")
             .addToLabels(Constants.NAME, "jobName2")
@@ -448,14 +448,23 @@ class TransferServiceTest {
             .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
             .endMetadata()
             .build();
+        ConfigMap jobDataConfigMap1 = new ConfigMapBuilder()
+                .addToData(Map.of(Constants.JOB_CONFIG_FIELD, "{\"nodes\":[], \"edges\":[]}"))
+                .withNewMetadata()
+                .withName("jobId1-cfg")
+                .addToLabels(Constants.NAME, "jobName2")
+                .addToLabels(Constants.TYPE, Constants.TYPE_JOB_CONFIG)
+                .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
+                .endMetadata()
+                .build();
 
         ConfigMap configMap2 = new ConfigMapBuilder()
             .addToData(Map.of(Constants.EXECUTOR_MEMORY,
                               "1G",
                               Constants.DRIVER_MEMORY,
                               "1G",
-                              Constants.JOB_CONFIG_FIELD,
-                              "{\"nodes\":[], \"edges\":[]}"))
+                              Constants.JOB_CONFIG_PATH_FIELD,
+                              "test"))
             .withNewMetadata()
             .withName("jobId2")
             .addToLabels(Constants.NAME, "jobName2-Copy")
@@ -469,8 +478,8 @@ class TransferServiceTest {
                               "1G",
                               Constants.DRIVER_MEMORY,
                               "1G",
-                              Constants.JOB_CONFIG_FIELD,
-                              "{\"nodes\":[], \"edges\":[]}"))
+                              Constants.JOB_CONFIG_PATH_FIELD,
+                              "test"))
             .withNewMetadata()
             .withName("jobId3")
             .addToLabels(Constants.NAME, "jobName2-Copy2")
@@ -484,8 +493,8 @@ class TransferServiceTest {
                               "1G",
                               Constants.DRIVER_MEMORY,
                               "1G",
-                              Constants.JOB_CONFIG_FIELD,
-                              "{\"nodes\":[], \"edges\":[]}"))
+                              Constants.JOB_CONFIG_PATH_FIELD,
+                              "test"))
             .withNewMetadata()
             .withName("jobId4")
             .addToLabels(Constants.NAME, "jobName2-Copy3")
@@ -502,6 +511,8 @@ class TransferServiceTest {
             ConfigMap original = SerializationUtils.clone(configMap1);
             when(argoKubernetesService.getConfigMap("projectId", original.getMetadata().getName()))
                 .thenReturn(original);
+            when(argoKubernetesService.getConfigMap("projectId", String.format("%s-cfg", original.getMetadata().getName())))
+                    .thenReturn(jobDataConfigMap1);
             transferService.copyJob("projectId", original.getMetadata().getName());
             assertEquals(wf.getMetadata().getLabels().get(Constants.NAME),
                          original.getMetadata().getLabels().get(Constants.NAME),
@@ -515,6 +526,8 @@ class TransferServiceTest {
         ConfigMap original = SerializationUtils.clone(configMap1);
         when(argoKubernetesService.getConfigMap("projectId", original.getMetadata().getName()))
             .thenReturn(original);
+        when(argoKubernetesService.getConfigMap("projectId", String.format("%s-cfg", original.getMetadata().getName())))
+                .thenReturn(jobDataConfigMap1);
         transferService.copyJob("projectId", original.getMetadata().getName());
         assertEquals(configMap4.getMetadata().getLabels().get(Constants.NAME),
                      original.getMetadata().getLabels().get(Constants.NAME),

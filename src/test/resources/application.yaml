@@ -82,6 +82,8 @@ job:
     serviceAccount: test
     roleBinding: test
     podStopCommand: "pkill -SIGTERM -u job-user"
+  config:
+    mountPath: \test
 argo:
   serverUrl: test
   limits:

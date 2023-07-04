@@ -216,6 +216,7 @@ class PipelineServiceTest {
             "spark",
             "pullSecret",
             "pvcMountPath",
+            "jobConfigMountPath",
             "host",
             "notificationImage",
             "botToken",

@@ -47,6 +47,7 @@ import by.iba.vfapi.model.argo.EnvFrom;
 import by.iba.vfapi.model.argo.FieldRef;
 import by.iba.vfapi.model.argo.ImagePullSecret;
 import by.iba.vfapi.model.argo.Inputs;
+import by.iba.vfapi.model.argo.KeyToPath;
 import by.iba.vfapi.model.argo.NodeStatus;
 import by.iba.vfapi.model.argo.Parameter;
 import by.iba.vfapi.model.argo.PipelineParams;
@@ -105,6 +106,7 @@ import java.util.stream.Collectors;
 import javax.validation.Valid;
 import javax.validation.constraints.NotNull;
 import java.util.regex.Pattern;
+
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.binary.Base64;
@@ -125,7 +127,6 @@ import static by.iba.vfapi.dto.Constants.PIPELINE_ID_LABEL;
 import static by.iba.vfapi.dto.Constants.NODE_NAME;
 import static by.iba.vfapi.dto.Constants.PIPELINE_HISTORY;
 import static by.iba.vfapi.dto.Constants.PIPELINE_NODE_HISTORY;
-import static by.iba.vfapi.dto.Constants.PIPELINE_NAME_LABEL;
 
 /**
  * PipelineService class.
@@ -147,13 +148,17 @@ public class PipelineService {
     public static final String PIPELINE_ID = "pipelineId";
     public static final String CONTAINER_WITH_CMD_TEMPLATE_NAME = "containerTemplateWithCmd";
     public static final String CONTAINER_WITH_CMD_AND_PROJECT_PARAMS_TEMPLATE_NAME =
-        "containerTemplateWithCmdAndProjectParams";
+            "containerTemplateWithCmdAndProjectParams";
     public static final String CONTAINER_TEMPLATE_NAME = "containerTemplate";
     public static final String CONTAINER_TEMPLATE_WITH_PROJECT_PARAMS_NAME = "containerTemplateWithProjectParams";
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final int DEPENDS_OPERATOR_LENGTH = 4;
     private static final String GRAPH_ID = "graphId";
     private static final String INPUT_PARAMETER_PATTERN = "{{inputs.parameters.%s}}";
+    private static final String ALWAYS_PULL_POLICY = "Always";
+    private static final String INPUT_PARAMETER_PATTERN_IS_TRUE = " {{inputs.parameters.%s}} == true";
+    private static final String INPUTS_PARAMETERS_NAME = "{{inputs.parameters.name}}";
+    private static final String INPUTS_PARAMETERS_OPERATION = "{{inputs.parameters.operation}}";
     private final String host;
     private final String slackToken;
     private final MailSenderConfig mailSenderConfig;
@@ -166,28 +171,30 @@ public class PipelineService {
     private final String imagePullSecret;
     private final String notificationImage;
     private final String pvcMountPath;
+    private final String jobConfigMountPath;
     private final WorkflowService workflowService;
     private final AuthenticationService authenticationService;
     private final DependencyHandlerService dependencyHandlerService;
     private final PipelineHistoryRepository<? extends AbstractHistory> pipelineHistoryRepository;
 
     public PipelineService(
-        @Value("${job.spark.image}") String sparkImage,
-        @Value("${job.spark.master}") final String jobMaster,
-        @Value("${job.spark.serviceAccount}") final String serviceAccount,
-        @Value("${job.imagePullSecret}") final String imagePullSecret,
-        @Value("${pvc.mountPath}") final String pvcMountPath,
-        @Value("${server.host}") final String host,
-        @Value("${notifications.image}") final String notificationImage,
-        @Value("${notifications.slack.token}") final String slackToken,
-        MailSenderConfig mailSenderConfig,
-        ArgoKubernetesService argoKubernetesService,
-        ProjectService projService,
-        WorkflowServiceApi apiInstance,
-        final WorkflowService workflowService,
-        final AuthenticationService authenticationService,
-        final DependencyHandlerService dependencyHandlerService,
-        final PipelineHistoryRepository<? extends AbstractHistory> pipelineHistoryRepository) {
+            @Value("${job.spark.image}") String sparkImage,
+            @Value("${job.spark.master}") final String jobMaster,
+            @Value("${job.spark.serviceAccount}") final String serviceAccount,
+            @Value("${job.imagePullSecret}") final String imagePullSecret,
+            @Value("${pvc.mountPath}") final String pvcMountPath,
+            @Value("${job.config.mountPath}") final String jobConfigMountPath,
+            @Value("${server.host}") final String host,
+            @Value("${notifications.image}") final String notificationImage,
+            @Value("${notifications.slack.token}") final String slackToken,
+            MailSenderConfig mailSenderConfig,
+            ArgoKubernetesService argoKubernetesService,
+            ProjectService projService,
+            WorkflowServiceApi apiInstance,
+            final WorkflowService workflowService,
+            final AuthenticationService authenticationService,
+            final DependencyHandlerService dependencyHandlerService,
+            final PipelineHistoryRepository<? extends AbstractHistory> pipelineHistoryRepository) {
         this.host = host;
         this.notificationImage = notificationImage;
         this.slackToken = slackToken;
@@ -200,6 +207,7 @@ public class PipelineService {
         this.projectService = projService;
         this.apiInstance = apiInstance;
         this.pvcMountPath = pvcMountPath;
+        this.jobConfigMountPath = jobConfigMountPath;
         this.workflowService = workflowService;
         this.authenticationService = authenticationService;
         this.dependencyHandlerService = dependencyHandlerService;
@@ -216,24 +224,24 @@ public class PipelineService {
      * @return new DAGTask
      */
     private static DagTask createSparkDagTask(
-        String name,
-        String depends,
-        @NotNull String parameterValue,
-        String graphId,
-        String pipelineId,
-        String jobName,
-        String operation
+            String name,
+            String depends,
+            @NotNull String parameterValue,
+            String graphId,
+            String pipelineId,
+            String jobName,
+            String operation
     ) {
         return new DagTask()
-            .name(name)
-            .template(SPARK_TEMPLATE_NAME)
-            .depends(depends)
-            .arguments(new Arguments()
-                           .addParametersItem(new Parameter().name(K8sUtils.CONFIGMAP).value(parameterValue))
-                           .addParametersItem(new Parameter().name(NODE_NAME).value(jobName))
-                           .addParametersItem(new Parameter().name(NODE_OPERATION).value(operation))
-                           .addParametersItem(new Parameter().name(PIPELINE_ID_LABEL).value(pipelineId))
-                           .addParametersItem(new Parameter().name(GRAPH_ID).value(graphId)));
+                .name(name)
+                .template(SPARK_TEMPLATE_NAME)
+                .depends(depends)
+                .arguments(new Arguments()
+                        .addParametersItem(new Parameter().name(K8sUtils.CONFIGMAP).value(parameterValue))
+                        .addParametersItem(new Parameter().name(NODE_NAME).value(jobName))
+                        .addParametersItem(new Parameter().name(NODE_OPERATION).value(operation))
+                        .addParametersItem(new Parameter().name(PIPELINE_ID_LABEL).value(pipelineId))
+                        .addParametersItem(new Parameter().name(GRAPH_ID).value(graphId)));
     }
 
     /**
@@ -246,33 +254,33 @@ public class PipelineService {
      * @return task
      */
     private static DagTask createContainerDagTask(
-        String name,
-        String depends,
-        ContainerStageConfig config,
-        String nodeId,
-        String pipelineId,
-        String jobName,
-        String operation) {
+            String name,
+            String depends,
+            ContainerStageConfig config,
+            String nodeId,
+            String pipelineId,
+            String jobName,
+            String operation) {
         Arguments arguments = new Arguments()
-            .addParametersItem(new Parameter().name(IMAGE_PULL_POLICY).value(config.getImagePullPolicy()))
-            .addParametersItem(new Parameter().name(IMAGE_LINK).value(config.getImageLink()))
-            .addParametersItem(new Parameter()
-                                   .name(LIMITS_CPU)
-                                   .value(Quantity.parse(config.getLimitsCpu()).toString()))
-            .addParametersItem(new Parameter()
-                                   .name(LIMITS_MEMORY)
-                                   .value(Quantity.parse(config.getLimitsMemory()).toString()))
-            .addParametersItem(new Parameter()
-                                   .name(REQUESTS_CPU)
-                                   .value(Quantity.parse(config.getRequestCpu()).toString()))
-            .addParametersItem(new Parameter()
-                                   .name(REQUESTS_MEMORY)
-                                   .value(Quantity.parse(config.getRequestMemory()).toString()))
-            .addParametersItem(new Parameter().name(Constants.CONTAINER_NODE_ID).value(nodeId))
-            .addParametersItem(new Parameter().name(Constants.PIPELINE_ID_LABEL).value(pipelineId))
-            .addParametersItem(new Parameter().name(GRAPH_ID).value(nodeId))
-            .addParametersItem(new Parameter().name(NODE_NAME).value(jobName))
-            .addParametersItem(new Parameter().name(NODE_OPERATION).value(operation));
+                .addParametersItem(new Parameter().name(IMAGE_PULL_POLICY).value(config.getImagePullPolicy()))
+                .addParametersItem(new Parameter().name(IMAGE_LINK).value(config.getImageLink()))
+                .addParametersItem(new Parameter()
+                        .name(LIMITS_CPU)
+                        .value(Quantity.parse(config.getLimitsCpu()).toString()))
+                .addParametersItem(new Parameter()
+                        .name(LIMITS_MEMORY)
+                        .value(Quantity.parse(config.getLimitsMemory()).toString()))
+                .addParametersItem(new Parameter()
+                        .name(REQUESTS_CPU)
+                        .value(Quantity.parse(config.getRequestCpu()).toString()))
+                .addParametersItem(new Parameter()
+                        .name(REQUESTS_MEMORY)
+                        .value(Quantity.parse(config.getRequestMemory()).toString()))
+                .addParametersItem(new Parameter().name(Constants.CONTAINER_NODE_ID).value(nodeId))
+                .addParametersItem(new Parameter().name(Constants.PIPELINE_ID_LABEL).value(pipelineId))
+                .addParametersItem(new Parameter().name(GRAPH_ID).value(nodeId))
+                .addParametersItem(new Parameter().name(NODE_NAME).value(jobName))
+                .addParametersItem(new Parameter().name(NODE_OPERATION).value(operation));
         boolean withCustomCommand = config.getStartCommand() != null && !config.getStartCommand().isEmpty();
         String template = composeContainerTemplateName(withCustomCommand, config.isMountProjectParams());
         if (withCustomCommand) {
@@ -292,30 +300,30 @@ public class PipelineService {
      * @return new DAGTask
      */
     private static DagTask createNotificationDagTask(
-        String name,
-        String depends,
-        String addressees,
-        String message,
-        String graphId,
-        String jobName,
-        String operation) {
+            String name,
+            String depends,
+            String addressees,
+            String message,
+            String graphId,
+            String jobName,
+            String operation) {
         return new DagTask()
-            .name(name)
-            .template(NOTIFICATION_TEMPLATE_NAME)
-            .depends(depends)
-            .arguments(new Arguments()
-                           .addParametersItem(new Parameter()
-                                                  .name(Constants.NODE_NOTIFICATION_RECIPIENTS)
-                                                  .value(Arrays
-                                                             .stream(addressees.split(" "))
-                                                             .map(StringEscapeUtils::escapeXSI)
-                                                             .collect(Collectors.joining(" "))))
-                           .addParametersItem(new Parameter()
-                                                  .name(Constants.NODE_NOTIFICATION_MESSAGE)
-                                                  .value(StringEscapeUtils.escapeXSI(message)))
-                           .addParametersItem(new Parameter().name(GRAPH_ID).value(graphId))
-                           .addParametersItem(new Parameter().name(NODE_NAME).value(jobName))
-                           .addParametersItem(new Parameter().name(NODE_OPERATION).value(operation)));
+                .name(name)
+                .template(NOTIFICATION_TEMPLATE_NAME)
+                .depends(depends)
+                .arguments(new Arguments()
+                        .addParametersItem(new Parameter()
+                                .name(Constants.NODE_NOTIFICATION_RECIPIENTS)
+                                .value(Arrays
+                                        .stream(addressees.split(" "))
+                                        .map(StringEscapeUtils::escapeXSI)
+                                        .collect(Collectors.joining(" "))))
+                        .addParametersItem(new Parameter()
+                                .name(Constants.NODE_NOTIFICATION_MESSAGE)
+                                .value(StringEscapeUtils.escapeXSI(message)))
+                        .addParametersItem(new Parameter().name(GRAPH_ID).value(graphId))
+                        .addParametersItem(new Parameter().name(NODE_NAME).value(jobName))
+                        .addParametersItem(new Parameter().name(NODE_OPERATION).value(operation)));
     }
 
     /**
@@ -349,22 +357,22 @@ public class PipelineService {
      * @param definition           definition for workflowTemplate
      */
     static void setMeta(
-        WorkflowTemplate workflowTemplate,
-        String workflowTemplateId,
-        String workflowTemplateName,
-        JsonNode definition) {
+            WorkflowTemplate workflowTemplate,
+            String workflowTemplateId,
+            String workflowTemplateName,
+            JsonNode definition) {
         workflowTemplate.setMetadata(new ObjectMetaBuilder()
-                                         .withName(workflowTemplateId)
-                                         .addToLabels(Constants.NAME, workflowTemplateName)
-                                         .addToAnnotations(Constants.DEFINITION,
-                                                           Base64.encodeBase64String(definition
-                                                                                         .toString()
-                                                                                         .getBytes(StandardCharsets.UTF_8)))
-                                         .addToAnnotations(Constants.LAST_MODIFIED,
-                                                           ZonedDateTime
-                                                               .now()
-                                                               .format(Constants.DATE_TIME_FORMATTER))
-                                         .build());
+                .withName(workflowTemplateId)
+                .addToLabels(Constants.NAME, workflowTemplateName)
+                .addToAnnotations(Constants.DEFINITION,
+                        Base64.encodeBase64String(definition
+                                .toString()
+                                .getBytes(StandardCharsets.UTF_8)))
+                .addToAnnotations(Constants.LAST_MODIFIED,
+                        ZonedDateTime
+                                .now()
+                                .format(Constants.DATE_TIME_FORMATTER))
+                .build());
     }
 
     /**
@@ -374,7 +382,7 @@ public class PipelineService {
      * @param edges list of GraphDto.EdgeDto
      */
     private static void replaceIds(
-        Iterable<GraphDto.NodeDto> nodes, Iterable<GraphDto.EdgeDto> edges) {
+            Iterable<GraphDto.NodeDto> nodes, Iterable<GraphDto.EdgeDto> edges) {
         for (GraphDto.NodeDto node : nodes) {
             String id = node.getId();
             String generatedId = K8sUtils.getKubeCompatibleUUID();
@@ -401,9 +409,9 @@ public class PipelineService {
      * @return dag template
      */
     private static DagTemplate createDagFlow(
-        GraphDto graphDto,
-        Map<GraphDto.NodeDto, ContainerStageConfig> containerStageConfig,
-        WorkflowTemplate workflowTemplate) {
+            GraphDto graphDto,
+            Map<GraphDto.NodeDto, ContainerStageConfig> containerStageConfig,
+            WorkflowTemplate workflowTemplate) {
         List<GraphDto.NodeDto> nodes = graphDto.getNodes();
         List<GraphDto.EdgeDto> edges = graphDto.getEdges();
         replaceIds(nodes, edges);
@@ -424,12 +432,12 @@ public class PipelineService {
             String id = node.getId();
             String nodeDependencies = accumulateDepends(edges, id);
             StringBuilder waitNodeDependencies = new StringBuilder();
-            for (String nodeDependency: parseDependenciesAsList(nodeDependencies)) {
+            for (String nodeDependency : parseDependenciesAsList(nodeDependencies)) {
                 String waitNodeID = checkDependencyForWaitNode(waitNodes, nodeDependency);
-                if(waitNodeID != null) {
+                if (waitNodeID != null) {
                     waitNodeDependencies.append(formatDependencies(
-                                waitNodeDependencies,
-                                accumulateDepends(edges, waitNodeID)));
+                            waitNodeDependencies,
+                            accumulateDepends(edges, waitNodeID)));
                     nodeDependencies = waitNodeDependencies.toString();
                 }
             }
@@ -439,45 +447,45 @@ public class PipelineService {
             switch (operation) {
                 case NODE_OPERATION_JOB:
                     dagTask = createSparkDagTask(id, nodeDependencies,
-                                                 node.getValue().get(NODE_JOB_ID),
-                                                 node.getValue().get(id),
-                                                 workflowTemplate.getMetadata().getName(),
-                                                 stageName,
-                                                 operation);
+                            node.getValue().get(NODE_JOB_ID),
+                            node.getValue().get(id),
+                            workflowTemplate.getMetadata().getName(),
+                            stageName,
+                            operation);
                     break;
                 case NODE_OPERATION_PIPELINE:
                     dagTask = createPipelineDagTask(id, nodeDependencies,
-                                                 node.getValue().get(NODE_PIPELINE_ID),
-                                                 node.getValue().get(id),
-                                                 stageName,
-                                                 operation);
+                            node.getValue().get(NODE_PIPELINE_ID),
+                            node.getValue().get(id),
+                            stageName,
+                            operation);
                     break;
                 case NODE_OPERATION_NOTIFICATION:
                     dagTask = createNotificationDagTask(id, nodeDependencies,
-                                                        node.getValue()
-                                                            .get(Constants.NODE_NOTIFICATION_RECIPIENTS),
-                                                        node.getValue().get(Constants.NODE_NOTIFICATION_MESSAGE),
-                                                        node.getValue().get(id),
-                                                        stageName,
-                                                        operation);
+                            node.getValue()
+                                    .get(Constants.NODE_NOTIFICATION_RECIPIENTS),
+                            node.getValue().get(Constants.NODE_NOTIFICATION_MESSAGE),
+                            node.getValue().get(id),
+                            stageName,
+                            operation);
                     break;
                 case NODE_OPERATION_CONTAINER:
                     Optional<ContainerStageConfig> nodeConfig = containerStageConfig
-                        .entrySet()
-                        .stream()
-                        .filter(e -> e.getKey().equals(node))
-                        .findFirst()
-                        .map(Map.Entry::getValue);
+                            .entrySet()
+                            .stream()
+                            .filter(e -> e.getKey().equals(node))
+                            .findFirst()
+                            .map(Map.Entry::getValue);
                     if (nodeConfig.isEmpty()) {
                         throw new InternalProcessingException("Cannot find container config for a node " +
-                                                                  node.getId());
+                                node.getId());
                     }
                     dagTask = createContainerDagTask(id, nodeDependencies,
-                                                     nodeConfig.get(),
-                                                     node.getValue().get(id),
-                                                     workflowTemplate.getMetadata().getName(),
-                                                     stageName,
-                                                     operation);
+                            nodeConfig.get(),
+                            node.getValue().get(id),
+                            workflowTemplate.getMetadata().getName(),
+                            stageName,
+                            operation);
                     break;
                 default:
                     throw new BadRequestException("Unknown operation type");
@@ -494,29 +502,29 @@ public class PipelineService {
      */
     private static void validateNodes(List<GraphDto.NodeDto> nodes) {
         nodes
-            .stream()
-            .filter((GraphDto.NodeDto n) -> n.getValue().get(NODE_JOB_ID) != null)
-            .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()))
-            .entrySet()
-            .stream()
-            .filter((Map.Entry<GraphDto.NodeDto, Long> e) -> e.getValue() > 1)
-            .findAny()
-            .ifPresent((Map.Entry<GraphDto.NodeDto, Long> e) -> {
-                throw new BadRequestException("Job can't be used more than once in pipeline");
-            });
+                .stream()
+                .filter((GraphDto.NodeDto n) -> n.getValue().get(NODE_JOB_ID) != null)
+                .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()))
+                .entrySet()
+                .stream()
+                .filter((Map.Entry<GraphDto.NodeDto, Long> e) -> e.getValue() > 1)
+                .findAny()
+                .ifPresent((Map.Entry<GraphDto.NodeDto, Long> e) -> {
+                    throw new BadRequestException("Job can't be used more than once in pipeline");
+                });
     }
 
     /**
      * Format dependencies result for wait node.
      *
-     * @param waitNodeDependencies  final result wait dependencies
-     * @param dependencies dependencies for some pipeline stage id
+     * @param waitNodeDependencies final result wait dependencies
+     * @param dependencies         dependencies for some pipeline stage id
      * @return String formated dependencies result
      */
     private static String formatDependencies(
             StringBuilder waitNodeDependencies,
             String dependencies) {
-        if(waitNodeDependencies.toString().isEmpty()) {
+        if (waitNodeDependencies.toString().isEmpty()) {
             return dependencies;
         } else {
             return String.format(" && %s", dependencies);
@@ -601,9 +609,9 @@ public class PipelineService {
      * @return Template with dag
      */
     private static Template createTemplateWithDag(
-        GraphDto graphDto,
-        Map<GraphDto.NodeDto, ContainerStageConfig> containerStageConfig,
-        WorkflowTemplate workflowTemplate) {
+            GraphDto graphDto,
+            Map<GraphDto.NodeDto, ContainerStageConfig> containerStageConfig,
+            WorkflowTemplate workflowTemplate) {
         DagTemplate dagFlow = createDagFlow(graphDto, containerStageConfig, workflowTemplate);
         return new Template().name(Constants.DAG_TEMPLATE_NAME).dag(dagFlow);
     }
@@ -612,7 +620,7 @@ public class PipelineService {
             String notificationType,
             String templateName,
             String sendTo,
-            String mentionedUsers){
+            String mentionedUsers) {
         return new Template()
                 .name(templateName)
                 .inputs(new Inputs()
@@ -625,16 +633,16 @@ public class PipelineService {
                         .command(List.of("/bin/bash", "-c"))
                         .args(List.of(
                                 String.format("java -jar /app/notification-service.jar" +
-                                              " %s" +                                 // notification type
-                                              " \"{{inputs.parameters.%s}}\"" +       // notification recipients
-                                              " \"{{inputs.parameters.%s}}\"" +       // notification subject
-                                              " \"%s\"" +                             // mentioned users
-                                              " \"{{workflow.name}}\"" +              // workflow name
-                                              " \"{{workflow.labels.%s}}\"" +         // workflow label
-                                              " \"{{workflow.namespace}}\"" +         // workflow namespace
-                                              " \"{{workflow.status}}\"" +            // workflow status
-                                              " \"{{workflow.creationTimestamp}}\"" + // workflow creation timestamp
-                                              " \"{{workflow.duration}}\"",           // workflow duration
+                                                " %s" +                                 // notification type
+                                                " \"{{inputs.parameters.%s}}\"" +       // notification recipients
+                                                " \"{{inputs.parameters.%s}}\"" +       // notification subject
+                                                " \"%s\"" +                             // mentioned users
+                                                " \"{{workflow.name}}\"" +              // workflow name
+                                                " \"{{workflow.labels.%s}}\"" +         // workflow label
+                                                " \"{{workflow.namespace}}\"" +         // workflow namespace
+                                                " \"{{workflow.status}}\"" +            // workflow status
+                                                " \"{{workflow.creationTimestamp}}\"" + // workflow creation timestamp
+                                                " \"{{workflow.duration}}\"",           // workflow duration
                                         notificationType,
                                         Constants.NODE_NOTIFICATION_RECIPIENTS,
                                         Constants.NODE_NOTIFICATION_SUBJECT,
@@ -655,7 +663,7 @@ public class PipelineService {
                                         .getProperty("mail.smtp.auth"))))
                         .envFrom(List.of(new EnvFrom().secretRef(new SecretRef().name(ParamsDto.SECRET_NAME))))
                         .image(notificationImage)
-                        .imagePullPolicy("Always")
+                        .imagePullPolicy(ALWAYS_PULL_POLICY)
                         .name(null)
                         .resources(new ResourceRequirementsBuilder()
                                 .addToLimits(Map.of(Constants.CPU_FIELD,
@@ -675,10 +683,10 @@ public class PipelineService {
     static List<DagTask> getDagTaskFromWorkflowTemplateSpec(WorkflowTemplateSpec workflowTemplateSpec) {
         List<Template> templates = workflowTemplateSpec.getTemplates();
         Template dagTemplate = templates
-            .stream()
-            .filter(template -> Constants.DAG_TEMPLATE_NAME.equals(template.getName()))
-            .findAny()
-            .orElseThrow(() -> new InternalProcessingException("Pipeline config is corrupted"));
+                .stream()
+                .filter(template -> Constants.DAG_TEMPLATE_NAME.equals(template.getName()))
+                .findAny()
+                .orElseThrow(() -> new InternalProcessingException("Pipeline config is corrupted"));
         if (dagTemplate.getDag().getTasks() == null) {
             return Collections.emptyList();
         }
@@ -693,7 +701,7 @@ public class PipelineService {
      * @param accessibleToRun is user have permission for run
      */
     private static void appendRunnable(
-        Collection<DagTask> dagTasks, PipelineOverviewDto dto, boolean accessibleToRun) {
+            Collection<DagTask> dagTasks, PipelineOverviewDto dto, boolean accessibleToRun) {
         dto.runnable(accessibleToRun && !dagTasks.isEmpty());
     }
 
@@ -733,29 +741,29 @@ public class PipelineService {
      * @param constraintType  limits or requests
      */
     private static void compareResourceSettings(
-        BigDecimal availableCpu,
-        BigDecimal availableMemory,
-        BigDecimal neededCpu,
-        BigDecimal neededMemory,
-        String stageType,
-        String constraintType) {
+            BigDecimal availableCpu,
+            BigDecimal availableMemory,
+            BigDecimal neededCpu,
+            BigDecimal neededMemory,
+            String stageType,
+            String constraintType) {
         if (neededCpu.compareTo(availableCpu) > 0) {
             throw new BadRequestException(String.format("Project doesn't have enough %s CPU to run %s - (cores) " +
-                                                            "available(excluding resources for argo " +
-                                                            "executor):%s; needed:%s",
-                                                        constraintType,
-                                                        stageType,
-                                                        availableCpu,
-                                                        neededCpu));
+                            "available(excluding resources for argo " +
+                            "executor):%s; needed:%s",
+                    constraintType,
+                    stageType,
+                    availableCpu,
+                    neededCpu));
         }
         if (neededMemory.compareTo(availableMemory) > 0) {
             throw new BadRequestException(String.format("Project doesn't have enough %s RAM to run %s - (bytes) " +
-                                                            "available(excluding resources for argo " +
-                                                            "executor):%s; needed:%s",
-                                                        constraintType,
-                                                        stageType,
-                                                        availableMemory,
-                                                        neededMemory));
+                            "available(excluding resources for argo " +
+                            "executor):%s; needed:%s",
+                    constraintType,
+                    stageType,
+                    availableMemory,
+                    neededMemory));
         }
     }
 
@@ -769,52 +777,48 @@ public class PipelineService {
         List<DagTask> tasks = getDagTaskFromWorkflowTemplateSpec(workflowTemplate.getSpec());
         for (DagTask dagTask : tasks) {
             Optional<ResourceRequirements> resourceRequirements = dagTask
-                .getArguments()
-                .getParameters()
-                .stream()
-                .filter(parameter -> K8sUtils.CONFIGMAP.equals(parameter.getName()))
-                .findFirst()
-                .map(p -> K8sUtils.getResourceRequirements(argoKubernetesService
-                                                               .getConfigMap(projectId, p.getValue())
-                                                               .getData()));
+                    .getArguments()
+                    .getParameters()
+                    .stream()
+                    .filter(parameter -> K8sUtils.CONFIGMAP.equals(parameter.getName()))
+                    .findFirst()
+                    .map(p -> K8sUtils.getResourceRequirements(argoKubernetesService
+                            .getConfigMap(projectId, p.getValue())
+                            .getData()));
 
-            switch (dagTask.getTemplate()) {
-                case SPARK_TEMPLATE_NAME:
-                    resourceRequirements.ifPresent(r -> {
-                        Map<String, Quantity> requests = r.getRequests();
-                        Map<String, Quantity> limits = r.getLimits();
+            if (SPARK_TEMPLATE_NAME.equals(dagTask.getTemplate())) {
+                resourceRequirements.ifPresent(r -> {
+                    Map<String, Quantity> requests = r.getRequests();
+                    Map<String, Quantity> limits = r.getLimits();
 
-                        dagTask
+                    dagTask
                             .getArguments()
                             .setParameters(dagTask
-                                               .getArguments()
-                                               .getParameters()
-                                               .stream()
-                                               .filter(parameter -> K8sUtils.CONFIGMAP.equals(parameter.getName()) ||
-                                                   GRAPH_ID.equals(parameter.getName()) ||
-                                                   PIPELINE_ID_LABEL.equals(parameter.getName()) ||
-                                                   NODE_NAME.equals(parameter.getName()) ||
-                                                   NODE_OPERATION.equals(parameter.getName()))
-                                               .collect(Collectors.toList()));
+                                    .getArguments()
+                                    .getParameters()
+                                    .stream()
+                                    .filter(parameter -> K8sUtils.CONFIGMAP.equals(parameter.getName()) ||
+                                            GRAPH_ID.equals(parameter.getName()) ||
+                                            PIPELINE_ID_LABEL.equals(parameter.getName()) ||
+                                            NODE_NAME.equals(parameter.getName()) ||
+                                            NODE_OPERATION.equals(parameter.getName()))
+                                    .collect(Collectors.toList()));
 
-                        dagTask
+                    dagTask
                             .getArguments()
                             .addParametersItem(new Parameter()
-                                                   .name(LIMITS_CPU)
-                                                   .value(limits.get(Constants.CPU_FIELD).toString()))
+                                    .name(LIMITS_CPU)
+                                    .value(limits.get(Constants.CPU_FIELD).toString()))
                             .addParametersItem(new Parameter()
-                                                   .name(LIMITS_MEMORY)
-                                                   .value(limits.get(Constants.MEMORY_FIELD).toString()))
+                                    .name(LIMITS_MEMORY)
+                                    .value(limits.get(Constants.MEMORY_FIELD).toString()))
                             .addParametersItem(new Parameter()
-                                                   .name(REQUESTS_CPU)
-                                                   .value(requests.get(Constants.CPU_FIELD).toString()))
+                                    .name(REQUESTS_CPU)
+                                    .value(requests.get(Constants.CPU_FIELD).toString()))
                             .addParametersItem(new Parameter()
-                                                   .name(REQUESTS_MEMORY)
-                                                   .value(requests.get(Constants.MEMORY_FIELD).toString()));
-                    });
-                    break;
-                default:
-                    break;
+                                    .name(REQUESTS_MEMORY)
+                                    .value(requests.get(Constants.MEMORY_FIELD).toString()));
+                });
             }
         }
     }
@@ -826,8 +830,8 @@ public class PipelineService {
      */
     private Template createSparkTemplate(String namespace) {
         return new Template()
-            .name(SPARK_TEMPLATE_NAME)
-            .inputs(new Inputs()
+                .name(SPARK_TEMPLATE_NAME)
+                .inputs(new Inputs()
                         .addParametersItem(new Parameter().name(K8sUtils.CONFIGMAP))
                         .addParametersItem(new Parameter().name(PIPELINE_ID_LABEL))
                         .addParametersItem(new Parameter().name(NODE_NAME))
@@ -836,64 +840,74 @@ public class PipelineService {
                         .addParametersItem(new Parameter().name(LIMITS_MEMORY))
                         .addParametersItem(new Parameter().name(REQUESTS_CPU))
                         .addParametersItem(new Parameter().name(REQUESTS_MEMORY)))
-            .podSpecPatch(String.format("{\"containers\": [{\"name\": \"main\", \"resources\": {\"limits\": " +
-                                            "{\"cpu\": \"{{inputs.parameters.%s}}\", \"memory\": \"{{inputs" +
-                                            ".parameters.%s}}\"}, \"requests\": {\"cpu\": \"{{inputs.parameters" +
-                                            ".%s}}\", \"memory\": \"{{inputs.parameters.%s}}\"}}}]}",
-                                        LIMITS_CPU,
-                                        LIMITS_MEMORY,
-                                        REQUESTS_CPU,
-                                        REQUESTS_MEMORY))
-            .container(new Container()
-                           .name(K8sUtils.JOB_CONTAINER)
-                           .image(sparkImage)
-                           .command(List.of("/opt/spark/work-dir/entrypoint.sh"))
-                           .imagePullPolicy("Always")
-                           .volumeMounts(List.of(new VolumeMounts()
-                                   .name(K8sUtils.PVC_VOLUME_NAME)
-                                   .mountPath(pvcMountPath))
-                           )
-                           .env(List.of(new Env()
-                                            .name("POD_IP")
-                                            .valueFrom(new ValueFrom().name(new FieldRef()
-                                                                                .fieldPath("status.podIP")
-                                                                                .apiVersion("v1"))),
-                                        new Env()
-                                            .name("POD_NAME")
-                                            .valueFrom(new ValueFrom().name(new FieldRef()
-                                                                                .fieldPath("metadata.name")
-                                                                                .apiVersion("v1"))),
-                                        new Env()
-                                            .name("PIPELINE_JOB_ID")
-                                            .valueFrom(new ValueFrom().name(new FieldRef()
-                                                                                .fieldPath("metadata.name")
-                                                                                .apiVersion("v1"))),
-                                        new Env().name("JOB_ID").value("{{inputs.parameters.configMap}}"),
-                                        new Env().name("JOB_MASTER").value(jobMaster),
-                                        new Env().name("JOB_IMAGE").value(sparkImage),
-                                        new Env().name("IMAGE_PULL_SECRETS").value(imagePullSecret),
-                                        new Env().name("POD_NAMESPACE").value(namespace),
-                                        new Env().name("PVC_NAME").value(K8sUtils.PVC_NAME),
-                                        new Env().name("MOUNT_PATH").value(pvcMountPath)))
-                           .envFrom(List.of(new EnvFrom().configMapRef(new ConfigMapRef().name(
-                                                "{{inputs.parameters" +
-                                                    ".configMap}}")),
-                                            new EnvFrom().secretRef(new SecretRef().name(ParamsDto.SECRET_NAME)))))
-            .metadata(new TemplateMeta().labels(Map.of(Constants.JOB_ID_LABEL,
-                                                       "{{inputs.parameters.configMap}}",
-                                                        PIPELINE_ID_LABEL,
-                                                       "{{inputs.parameters.pipelineId}}",
-                                                        NODE_NAME,
-                                                       "{{inputs.parameters.name}}",
-                                                        NODE_OPERATION,
-                                                       "{{inputs.parameters.operation}}")))
-            .volumes(List.of(new Volumes()
+                .podSpecPatch(String.format("{\"containers\": [{\"name\": \"main\", \"resources\": {\"limits\": " +
+                                "{\"cpu\": \"{{inputs.parameters.%s}}\", \"memory\": \"{{inputs" +
+                                ".parameters.%s}}\"}, \"requests\": {\"cpu\": \"{{inputs.parameters" +
+                                ".%s}}\", \"memory\": \"{{inputs.parameters.%s}}\"}}}]}",
+                        LIMITS_CPU,
+                        LIMITS_MEMORY,
+                        REQUESTS_CPU,
+                        REQUESTS_MEMORY))
+                .container(new Container()
+                        .name(K8sUtils.JOB_CONTAINER)
+                        .image(sparkImage)
+                        .command(List.of("/opt/spark/work-dir/entrypoint.sh"))
+                        .imagePullPolicy(ALWAYS_PULL_POLICY)
+                        .volumeMounts(List.of(new VolumeMounts()
+                                        .name(K8sUtils.PVC_VOLUME_NAME)
+                                        .mountPath(pvcMountPath),
+                                new VolumeMounts()
+                                        .name("job-config-data")
+                                        .mountPath(jobConfigMountPath))
+                        )
+                        .env(List.of(new Env()
+                                        .name("POD_IP")
+                                        .valueFrom(new ValueFrom().name(new FieldRef()
+                                                .fieldPath("status.podIP")
+                                                .apiVersion("v1"))),
+                                new Env()
+                                        .name("POD_NAME")
+                                        .valueFrom(new ValueFrom().name(new FieldRef()
+                                                .fieldPath("metadata.name")
+                                                .apiVersion("v1"))),
+                                new Env()
+                                        .name("PIPELINE_JOB_ID")
+                                        .valueFrom(new ValueFrom().name(new FieldRef()
+                                                .fieldPath("metadata.name")
+                                                .apiVersion("v1"))),
+                                new Env().name("JOB_ID").value("{{inputs.parameters.configMap}}"),
+                                new Env().name("JOB_MASTER").value(jobMaster),
+                                new Env().name("JOB_IMAGE").value(sparkImage),
+                                new Env().name("IMAGE_PULL_SECRETS").value(imagePullSecret),
+                                new Env().name("POD_NAMESPACE").value(namespace),
+                                new Env().name("PVC_NAME").value(K8sUtils.PVC_NAME),
+                                new Env().name("MOUNT_PATH").value(pvcMountPath)))
+                        .envFrom(List.of(new EnvFrom().configMapRef(new ConfigMapRef().name(
+                                        "{{inputs.parameters" +
+                                                ".configMap}}")),
+                                new EnvFrom().secretRef(new SecretRef().name(ParamsDto.SECRET_NAME)))))
+                .metadata(new TemplateMeta().labels(Map.of(Constants.JOB_ID_LABEL,
+                        "{{inputs.parameters.configMap}}",
+                        PIPELINE_ID_LABEL,
+                        "{{inputs.parameters.pipelineId}}",
+                        NODE_NAME,
+                        INPUTS_PARAMETERS_NAME,
+                        NODE_OPERATION,
+                        INPUTS_PARAMETERS_OPERATION)))
+                .volumes(List.of(new Volumes()
                         .name(K8sUtils.PVC_VOLUME_NAME)
                         .persistentVolumeClaim(
                                 new PersistentVolumeClaim()
                                         .claimName(K8sUtils.PVC_NAME)
-                        ))
-            );
+                        ),
+                        new Volumes()
+                                .name("job-config-data")
+                                .configMap(new by.iba.vfapi.model.argo.ConfigMap()
+                                        .name("{{inputs.parameters.configMap}}" + Constants.JOB_CONFIG_SUFFIX)
+                                        .items(List.of(new KeyToPath()
+                                                .key(Constants.JOB_CONFIG_FIELD)
+                                                .path(Constants.JOB_CONFIG_FILE))))
+                ));
     }
 
     /**
@@ -904,22 +918,22 @@ public class PipelineService {
      * @return template
      */
     private Template createContainerTemplate(
-        boolean withCustomCommand, boolean mountProjectParams) {
+            boolean withCustomCommand, boolean mountProjectParams) {
         Inputs inputs = new Inputs()
-            .addParametersItem(new Parameter().name(LIMITS_CPU))
-            .addParametersItem(new Parameter().name(LIMITS_MEMORY))
-            .addParametersItem(new Parameter().name(REQUESTS_CPU))
-            .addParametersItem(new Parameter().name(REQUESTS_MEMORY))
-            .addParametersItem(new Parameter().name(IMAGE_LINK))
-            .addParametersItem(new Parameter().name(IMAGE_PULL_POLICY))
-            .addParametersItem(new Parameter().name(CONTAINER_NODE_ID))
-            .addParametersItem(new Parameter().name(PIPELINE_ID_LABEL))
-            .addParametersItem(new Parameter().name(GRAPH_ID))
-            .addParametersItem(new Parameter().name(NODE_NAME))
-            .addParametersItem(new Parameter().name(NODE_OPERATION));
+                .addParametersItem(new Parameter().name(LIMITS_CPU))
+                .addParametersItem(new Parameter().name(LIMITS_MEMORY))
+                .addParametersItem(new Parameter().name(REQUESTS_CPU))
+                .addParametersItem(new Parameter().name(REQUESTS_MEMORY))
+                .addParametersItem(new Parameter().name(IMAGE_LINK))
+                .addParametersItem(new Parameter().name(IMAGE_PULL_POLICY))
+                .addParametersItem(new Parameter().name(CONTAINER_NODE_ID))
+                .addParametersItem(new Parameter().name(PIPELINE_ID_LABEL))
+                .addParametersItem(new Parameter().name(GRAPH_ID))
+                .addParametersItem(new Parameter().name(NODE_NAME))
+                .addParametersItem(new Parameter().name(NODE_OPERATION));
         Container container = new Container()
-            .image(String.format(INPUT_PARAMETER_PATTERN, IMAGE_LINK))
-            .imagePullPolicy(String.format(INPUT_PARAMETER_PATTERN, IMAGE_PULL_POLICY));
+                .image(String.format(INPUT_PARAMETER_PATTERN, IMAGE_LINK))
+                .imagePullPolicy(String.format(INPUT_PARAMETER_PATTERN, IMAGE_PULL_POLICY));
         if (withCustomCommand) {
             inputs.addParametersItem(new Parameter().name(COMMAND));
             container.command(List.of("/bin/sh", "-c", "--", String.format(INPUT_PARAMETER_PATTERN, COMMAND)));
@@ -928,29 +942,29 @@ public class PipelineService {
             container.envFrom(List.of(new EnvFrom().secretRef(new SecretRef().name(ParamsDto.SECRET_NAME))));
         }
         return new Template()
-            .name(composeContainerTemplateName(withCustomCommand, mountProjectParams))
-            .inputs(inputs)
-            .podSpecPatch(String.format("{\"containers\": [{\"name\": \"main\", \"resources\": {\"limits\": " +
-                                            "{\"cpu\": \"{{inputs.parameters.%s}}\", \"memory\": \"{{inputs" +
-                                            ".parameters.%s}}\"}, \"requests\": {\"cpu\": \"{{inputs.parameters" +
-                                            ".%s}}\", \"memory\": \"{{inputs.parameters.%s}}\"}}}]}",
-                                        LIMITS_CPU,
-                                        LIMITS_MEMORY,
-                                        REQUESTS_CPU,
-                                        REQUESTS_MEMORY))
-            .container(container)
-            .metadata(new TemplateMeta().labels(Map.of(Constants.CONTAINER_NODE_ID,
-                                                       String.format(INPUT_PARAMETER_PATTERN,
-                                                               Constants.CONTAINER_NODE_ID),
-                                                       Constants.PIPELINE_ID_LABEL,
-                                                       String.format(INPUT_PARAMETER_PATTERN,
-                                                               Constants.PIPELINE_ID_LABEL),
-                                                       NODE_NAME,
-                                                       String.format(INPUT_PARAMETER_PATTERN,
-                                                               Constants.NODE_NAME),
-                                                       NODE_OPERATION,
-                                                       String.format(INPUT_PARAMETER_PATTERN,
-                                                               Constants.NODE_OPERATION))));
+                .name(composeContainerTemplateName(withCustomCommand, mountProjectParams))
+                .inputs(inputs)
+                .podSpecPatch(String.format("{\"containers\": [{\"name\": \"main\", \"resources\": {\"limits\": " +
+                                "{\"cpu\": \"{{inputs.parameters.%s}}\", \"memory\": \"{{inputs" +
+                                ".parameters.%s}}\"}, \"requests\": {\"cpu\": \"{{inputs.parameters" +
+                                ".%s}}\", \"memory\": \"{{inputs.parameters.%s}}\"}}}]}",
+                        LIMITS_CPU,
+                        LIMITS_MEMORY,
+                        REQUESTS_CPU,
+                        REQUESTS_MEMORY))
+                .container(container)
+                .metadata(new TemplateMeta().labels(Map.of(Constants.CONTAINER_NODE_ID,
+                        String.format(INPUT_PARAMETER_PATTERN,
+                                Constants.CONTAINER_NODE_ID),
+                        Constants.PIPELINE_ID_LABEL,
+                        String.format(INPUT_PARAMETER_PATTERN,
+                                Constants.PIPELINE_ID_LABEL),
+                        NODE_NAME,
+                        String.format(INPUT_PARAMETER_PATTERN,
+                                Constants.NODE_NAME),
+                        NODE_OPERATION,
+                        String.format(INPUT_PARAMETER_PATTERN,
+                                Constants.NODE_OPERATION))));
 
     }
 
@@ -961,36 +975,36 @@ public class PipelineService {
      */
     private Template createSlackJobNotificationTemplate() {
         return new Template()
-            .name(NOTIFICATION_TEMPLATE_NAME)
-            .inputs(new Inputs()
+                .name(NOTIFICATION_TEMPLATE_NAME)
+                .inputs(new Inputs()
                         .addParametersItem(new Parameter().name(Constants.NODE_NOTIFICATION_RECIPIENTS))
                         .addParametersItem(new Parameter().name(Constants.NODE_NOTIFICATION_MESSAGE))
                         .addParametersItem(new Parameter().name(NODE_NAME))
                         .addParametersItem(new Parameter().name(NODE_OPERATION)))
-            .metadata(new TemplateMeta().labels(Map.of(NODE_NAME,
-                        "{{inputs.parameters.name}}",
+                .metadata(new TemplateMeta().labels(Map.of(NODE_NAME,
+                        INPUTS_PARAMETERS_NAME,
                         NODE_OPERATION,
-                        "{{inputs.parameters.operation}}")))
-            .container(new Container()
-                           .image(notificationImage)
-                           .command(List.of("/bin/bash", "-c", "--"))
-                           .args(List.of(String.format(
-                               "python3 /app/slack_job.py -m {{inputs.parameters.%s}} -a {{inputs.parameters.%s}}",
-                               Constants.NODE_NOTIFICATION_MESSAGE,
-                               Constants.NODE_NOTIFICATION_RECIPIENTS)))
-                           .imagePullPolicy("Always")
-                           .env(List.of(new Env().name("SLACK_API_TOKEN").value(slackToken)))
-                           .envFrom(List.of(new EnvFrom().secretRef(new SecretRef().name(ParamsDto.SECRET_NAME))))
-                           .resources(new ResourceRequirementsBuilder()
-                                          .addToLimits(Map.of(Constants.CPU_FIELD,
-                                                              Quantity.parse("500m"),
-                                                              Constants.MEMORY_FIELD,
-                                                              Quantity.parse("500M")))
-                                          .addToRequests(Map.of(Constants.CPU_FIELD,
-                                                                Quantity.parse("100m"),
-                                                                Constants.MEMORY_FIELD,
-                                                                Quantity.parse("100M")))
-                                          .build()));
+                        INPUTS_PARAMETERS_OPERATION)))
+                .container(new Container()
+                        .image(notificationImage)
+                        .command(List.of("/bin/bash", "-c", "--"))
+                        .args(List.of(String.format(
+                                "python3 /app/slack_job.py -m {{inputs.parameters.%s}} -a {{inputs.parameters.%s}}",
+                                Constants.NODE_NOTIFICATION_MESSAGE,
+                                Constants.NODE_NOTIFICATION_RECIPIENTS)))
+                        .imagePullPolicy(ALWAYS_PULL_POLICY)
+                        .env(List.of(new Env().name("SLACK_API_TOKEN").value(slackToken)))
+                        .envFrom(List.of(new EnvFrom().secretRef(new SecretRef().name(ParamsDto.SECRET_NAME))))
+                        .resources(new ResourceRequirementsBuilder()
+                                .addToLimits(Map.of(Constants.CPU_FIELD,
+                                        Quantity.parse("500m"),
+                                        Constants.MEMORY_FIELD,
+                                        Quantity.parse("500M")))
+                                .addToRequests(Map.of(Constants.CPU_FIELD,
+                                        Quantity.parse("100m"),
+                                        Constants.MEMORY_FIELD,
+                                        Quantity.parse("100M")))
+                                .build()));
     }
 
     /**
@@ -1027,9 +1041,9 @@ public class PipelineService {
                         .failureCondition("status.phase in (Failed, Error)")
                 )
                 .metadata(new TemplateMeta().labels(Map.of(NODE_NAME,
-                                                           "{{inputs.parameters.name}}",
-                                                           NODE_OPERATION,
-                                                           "{{inputs.parameters.operation}}")));
+                        INPUTS_PARAMETERS_NAME,
+                        NODE_OPERATION,
+                        INPUTS_PARAMETERS_OPERATION)));
     }
 
     /**
@@ -1041,38 +1055,38 @@ public class PipelineService {
      */
     void setSpec(WorkflowTemplate workflowTemplate, String namespace, GraphDto graphDto, PipelineParams params) {
         Map<String, ParamDto> projectParams = new HashMap<>(projectService
-                                                                .getParams(namespace)
-                                                                .getParams()
-                                                                .stream()
-                                                                .collect(Collectors.toMap(ParamDto::getKey,
-                                                                                          Function.identity())));
+                .getParams(namespace)
+                .getParams()
+                .stream()
+                .collect(Collectors.toMap(ParamDto::getKey,
+                        Function.identity())));
         Map<GraphDto.NodeDto, ContainerStageConfig> containerStageConfig = graphDto
-            .getNodes()
-            .stream()
-            .filter((GraphDto.NodeDto node) -> NODE_OPERATION_CONTAINER.equals(node
-                                                                                   .getValue()
-                                                                                   .get(NODE_OPERATION)))
-            .collect(Collectors.toMap(Function.identity(), (GraphDto.NodeDto node) -> {
-                ContainerStageConfig config =
-                    ContainerStageConfig.fromContainerNode(node, projectParams, namespace, argoKubernetesService);
-                if (ContainerStageConfig.ImagePullSecretType.NEW == config.getImagePullSecretType()) {
-                    String secretName =
-                        KubernetesService.getUniqueEntityName((String secName) -> argoKubernetesService.getSecret(
-                            namespace,
-                            secName));
-                    config.prepareNewSecret(secretName, workflowTemplate.getMetadata().getName());
-                    argoKubernetesService.createOrReplaceSecret(namespace, config.getSecret());
-                }
-                return config;
-            }));
+                .getNodes()
+                .stream()
+                .filter((GraphDto.NodeDto node) -> NODE_OPERATION_CONTAINER.equals(node
+                        .getValue()
+                        .get(NODE_OPERATION)))
+                .collect(Collectors.toMap(Function.identity(), (GraphDto.NodeDto node) -> {
+                    ContainerStageConfig config =
+                            ContainerStageConfig.fromContainerNode(node, projectParams, namespace, argoKubernetesService);
+                    if (ContainerStageConfig.ImagePullSecretType.NEW == config.getImagePullSecretType()) {
+                        String secretName =
+                                KubernetesService.getUniqueEntityName((String secName) -> argoKubernetesService.getSecret(
+                                        namespace,
+                                        secName));
+                        config.prepareNewSecret(secretName, workflowTemplate.getMetadata().getName());
+                        argoKubernetesService.createOrReplaceSecret(namespace, config.getSecret());
+                    }
+                    return config;
+                }));
         Set<ImagePullSecret> pullSecrets = new HashSet<>();
         pullSecrets.add(new ImagePullSecret().name(imagePullSecret));
         containerStageConfig
-            .entrySet()
-            .stream()
-            .filter((Map.Entry<GraphDto.NodeDto, ContainerStageConfig> p) -> p.getValue().getSecret() != null)
-            .forEach((Map.Entry<GraphDto.NodeDto, ContainerStageConfig> p) -> pullSecrets.add(new ImagePullSecret().name(
-                p.getValue().getSecret().getMetadata().getName())));
+                .entrySet()
+                .stream()
+                .filter((Map.Entry<GraphDto.NodeDto, ContainerStageConfig> p) -> p.getValue().getSecret() != null)
+                .forEach((Map.Entry<GraphDto.NodeDto, ContainerStageConfig> p) -> pullSecrets.add(new ImagePullSecret().name(
+                        p.getValue().getSecret().getMetadata().getName())));
 
         List<Template> templates = new ArrayList<>();
         templates.add(createSlackJobNotificationTemplate());
@@ -1089,47 +1103,47 @@ public class PipelineService {
         templates.add(createTemplateWithDag(graphDto, containerStageConfig, workflowTemplate));
 
         workflowTemplate.setSpec(new WorkflowTemplateSpec()
-                                     .serviceAccountName(serviceAccount)
-                                     .entrypoint(Constants.DAG_TEMPLATE_NAME)
-                                     .onExit(Constants.EXIT_HANDLER)
-                                     .imagePullSecrets(pullSecrets)
-                                     .templates(templates)
-                                     .pipelineParams(params)
+                .serviceAccountName(serviceAccount)
+                .entrypoint(Constants.DAG_TEMPLATE_NAME)
+                .onExit(Constants.EXIT_HANDLER)
+                .imagePullSecrets(pullSecrets)
+                .templates(templates)
+                .pipelineParams(params)
         );
     }
 
     /**
      * Add notification templates to workflowTemplate according the conditions.
      *
-     * @param templates        list of templates
-     * @param pipelineParams   pipeline parameters
+     * @param templates      list of templates
+     * @param pipelineParams pipeline parameters
      */
     private void addNotificationTemplates(List<Template> templates, PipelineParams pipelineParams) {
         String emailRecipients = String.join(",", pipelineParams.getEmail().getRecipients());
         String slackChannels = String.join(",", pipelineParams.getSlack().getChannels());
         String slackRecipients = String.join(",", pipelineParams.getSlack().getRecipients());
-        if(pipelineParams.getEmail().getSuccessNotify()){
+        if (Boolean.TRUE.equals(pipelineParams.getEmail().getSuccessNotify())) {
             templates.add(createNotificationTemplate(
-                            Constants.EMAIL_NOTIFICATION,
-                            Constants.EMAIL_NOTIFY_SUCCESS,
-                            emailRecipients,
-                            "{{workflow.labels.startedBy}}"));
+                    Constants.EMAIL_NOTIFICATION,
+                    Constants.EMAIL_NOTIFY_SUCCESS,
+                    emailRecipients,
+                    "{{workflow.labels.startedBy}}"));
         }
-        if(pipelineParams.getEmail().getFailureNotify()) {
+        if (Boolean.TRUE.equals(pipelineParams.getEmail().getFailureNotify())) {
             templates.add(createNotificationTemplate(
-                            Constants.EMAIL_NOTIFICATION,
-                            Constants.EMAIL_NOTIFY_FAILURE,
-                            emailRecipients,
-                            "{{workflow.labels.startedBy}}"));
+                    Constants.EMAIL_NOTIFICATION,
+                    Constants.EMAIL_NOTIFY_FAILURE,
+                    emailRecipients,
+                    "{{workflow.labels.startedBy}}"));
         }
-        if(pipelineParams.getSlack().getSuccessNotify()){
+        if (Boolean.TRUE.equals(pipelineParams.getSlack().getSuccessNotify())) {
             templates.add(createNotificationTemplate(
                     Constants.SLACK_NOTIFICATION,
                     Constants.SLACK_NOTIFY_SUCCESS,
                     slackChannels,
                     slackRecipients));
         }
-        if(pipelineParams.getSlack().getFailureNotify()) {
+        if (Boolean.TRUE.equals(pipelineParams.getSlack().getFailureNotify())) {
             templates.add(createNotificationTemplate(
                     Constants.SLACK_NOTIFICATION,
                     Constants.SLACK_NOTIFY_FAILURE,
@@ -1149,44 +1163,44 @@ public class PipelineService {
                 .name(Constants.EXIT_HANDLER)
                 .inputs(new Inputs()
                         .addParametersItem(new Parameter().name(Constants.EMAIL_NOTIFY_SUCCESS)
-                                .value(params.getEmail().getSuccessNotify() ? "true": "false"))
+                                .value(Boolean.TRUE.equals(params.getEmail().getSuccessNotify()) ? Boolean.TRUE.toString() : Boolean.FALSE.toString()))
                         .addParametersItem(new Parameter().name(Constants.EMAIL_NOTIFY_FAILURE)
-                                .value(params.getEmail().getFailureNotify() ? "true": "false"))
+                                .value(Boolean.TRUE.equals(params.getEmail().getFailureNotify()) ? Boolean.TRUE.toString() : Boolean.FALSE.toString()))
                         .addParametersItem(new Parameter().name(Constants.SLACK_NOTIFY_SUCCESS)
-                                .value(params.getSlack().getSuccessNotify() ? "true": "false"))
+                                .value(Boolean.TRUE.equals(params.getSlack().getSuccessNotify()) ? Boolean.TRUE.toString() : Boolean.FALSE.toString()))
                         .addParametersItem(new Parameter().name(Constants.SLACK_NOTIFY_FAILURE)
-                                .value(params.getSlack().getFailureNotify() ? "true": "false"))
+                                .value(Boolean.TRUE.equals(params.getSlack().getFailureNotify()) ? Boolean.TRUE.toString() : Boolean.FALSE.toString()))
                 )
                 .steps(List.of(List.of(
                         new Step().name(Constants.EMAIL_NOTIFY_SUCCESS)
                                 .template(Constants.EMAIL_NOTIFY_SUCCESS)
                                 .when(String.format("{{workflow.status}} == Succeeded &&" +
-                                        " {{inputs.parameters.%s}} == true", Constants.EMAIL_NOTIFY_SUCCESS)),
+                                        INPUT_PARAMETER_PATTERN_IS_TRUE, Constants.EMAIL_NOTIFY_SUCCESS)),
                         new Step().name(Constants.EMAIL_NOTIFY_FAILURE)
                                 .template(Constants.EMAIL_NOTIFY_FAILURE)
                                 .when(String.format("{{workflow.status}} != Succeeded &&" +
-                                        " {{inputs.parameters.%s}} == true", Constants.EMAIL_NOTIFY_FAILURE)),
+                                        INPUT_PARAMETER_PATTERN_IS_TRUE, Constants.EMAIL_NOTIFY_FAILURE)),
                         new Step().name(Constants.SLACK_NOTIFY_SUCCESS)
                                 .template(Constants.SLACK_NOTIFY_SUCCESS)
                                 .when(String.format("{{workflow.status}} == Succeeded &&" +
-                                        " {{inputs.parameters.%s}} == true", Constants.SLACK_NOTIFY_SUCCESS)),
+                                        INPUT_PARAMETER_PATTERN_IS_TRUE, Constants.SLACK_NOTIFY_SUCCESS)),
                         new Step().name(Constants.SLACK_NOTIFY_FAILURE)
                                 .template(Constants.SLACK_NOTIFY_FAILURE)
                                 .when(String.format("{{workflow.status}} != Succeeded &&" +
-                                        " {{inputs.parameters.%s}} == true", Constants.SLACK_NOTIFY_FAILURE)))));
+                                        INPUT_PARAMETER_PATTERN_IS_TRUE, Constants.SLACK_NOTIFY_FAILURE)))));
     }
 
     /**
      * Update the pipeline parameters with a predefined condition
      *
-     * @param projectId projectId
+     * @param projectId        projectId
      * @param targetPipelineId targetPipelineId
-     * @param func function for updating pipeline ids
+     * @param func             function for updating pipeline ids
      */
     private void updatePipelineDependency(String projectId,
                                           String targetPipelineId,
                                           Function<PipelineParams,
-                                          Set<String>> func) {
+                                                  Set<String>> func) {
         WorkflowTemplate workflowTemplate =
                 argoKubernetesService.getWorkflowTemplate(projectId, targetPipelineId);
         PipelineParams pipelineParams = workflowTemplate.getSpec().getPipelineParams();
@@ -1232,39 +1246,35 @@ public class PipelineService {
 
         newIds.stream()
                 .filter(element -> !oldIds.contains(element))
-                .forEach((String targetPipelineId) -> {
-                    updatePipelineDependency(projectId, targetPipelineId,
-                            (PipelineParams pipelineParams) -> {
-                                Set<String> pipelineIDs =
-                                        Objects.requireNonNullElse(pipelineParams.getDependentPipelineIds(),
-                                                new HashSet<>());
-                                pipelineIDs.add(id);
-                                LOGGER.info(
-                                        "Pipeline dependency {} has been added to the pipeline {}",
-                                        id,
-                                        targetPipelineId);
-                                return pipelineIDs;
-                            });
-                });
+                .forEach((String targetPipelineId) -> updatePipelineDependency(projectId, targetPipelineId,
+                        (PipelineParams pipelineParams) -> {
+                            Set<String> pipelineIDs =
+                                    Objects.requireNonNullElse(pipelineParams.getDependentPipelineIds(),
+                                            new HashSet<>());
+                            pipelineIDs.add(id);
+                            LOGGER.info(
+                                    "Pipeline dependency {} has been added to the pipeline {}",
+                                    id,
+                                    targetPipelineId);
+                            return pipelineIDs;
+                        }));
 
         oldIds.stream()
                 .filter(element -> !newIds.contains(element))
-                .forEach((String targetPipelineId) -> {
-                    updatePipelineDependency(projectId, targetPipelineId,
-                            ((PipelineParams pipelineParams) -> {
-                                Set<String> pipelineIDs =
-                                        Objects.requireNonNullElse(pipelineParams.getDependentPipelineIds(),
-                                                new HashSet<>());
-                                pipelineIDs = pipelineIDs.stream()
-                                        .filter(pipelineId -> !pipelineId.equals(id))
-                                        .collect(Collectors.toSet());
-                                LOGGER.info(
-                                        "Pipeline dependency {} has been removed from pipeline {}",
-                                        id,
-                                        targetPipelineId);
-                                return pipelineIDs;
-                            }));
-                });
+                .forEach((String targetPipelineId) -> updatePipelineDependency(projectId, targetPipelineId,
+                        ((PipelineParams pipelineParams) -> {
+                            Set<String> pipelineIDs =
+                                    Objects.requireNonNullElse(pipelineParams.getDependentPipelineIds(),
+                                            new HashSet<>());
+                            pipelineIDs = pipelineIDs.stream()
+                                    .filter(pipelineId -> !pipelineId.equals(id))
+                                    .collect(Collectors.toSet());
+                            LOGGER.info(
+                                    "Pipeline dependency {} has been removed from pipeline {}",
+                                    id,
+                                    targetPipelineId);
+                            return pipelineIDs;
+                        })));
     }
 
     /**
@@ -1276,7 +1286,7 @@ public class PipelineService {
      * @return WorkflowTemplate
      */
     WorkflowTemplate createWorkflowTemplate(
-        String projectId, String id, String name, JsonNode definition, PipelineParams params) {
+            String projectId, String id, String name, JsonNode definition, PipelineParams params) {
         GraphDto graphDto = GraphDto.parseGraph(definition);
         GraphDto.validateGraphPipeline(graphDto, projectId, id, argoKubernetesService);
 
@@ -1296,14 +1306,14 @@ public class PipelineService {
      */
     void checkPipelineName(String projectId, String pipelineId, String pipelineName) {
         List<WorkflowTemplate> workflowTemplatesByLabels =
-            argoKubernetesService.getWorkflowTemplatesByLabels(projectId, Map.of(Constants.NAME, pipelineName));
+                argoKubernetesService.getWorkflowTemplatesByLabels(projectId, Map.of(Constants.NAME, pipelineName));
 
         if (workflowTemplatesByLabels.size() > 1 ||
-            (workflowTemplatesByLabels.size() == 1 &&
-                !workflowTemplatesByLabels.get(0).getMetadata().getName().equals(pipelineId))) {
+                (workflowTemplatesByLabels.size() == 1 &&
+                        !workflowTemplatesByLabels.get(0).getMetadata().getName().equals(pipelineId))) {
             throw new BadRequestException(String.format("Pipeline with name '%s' already exist in project %s",
-                                                        pipelineName,
-                                                        projectId));
+                    pipelineName,
+                    projectId));
         }
     }
 
@@ -1328,9 +1338,9 @@ public class PipelineService {
         argoKubernetesService.createOrReplaceWorkflowTemplate(projectId, workflowTemplate);
         dependencyHandlerService.addDependencies(projectId, id,
                 dependencyHandlerService.getNodesByDefinition(
-                        dependencyHandlerService.getDefinition(workflowTemplate)));
+                        DependencyHandlerService.getDefinition(workflowTemplate)));
         List<String> foundParams = ProjectService.findParamsKeysInString(definition.toString());
-        if(!foundParams.isEmpty()) {
+        if (!foundParams.isEmpty()) {
             List<ParamDto> existingParams = projectService.getParams(projectId).getParams();
             existingParams
                     .stream()
@@ -1422,37 +1432,37 @@ public class PipelineService {
             if (Constants.NODE_TYPE_POD.equals(nodeStatus.getType())) {
                 String displayName = nodeStatus.getDisplayName();
                 statuses.putAll(storedTemplates
-                                    .stream()
-                                    .filter((Template storedTemplate) -> Constants.DAG_TEMPLATE_NAME.equals(
-                                        storedTemplate.getName()))
-                                    .flatMap((Template storedTemplate) -> storedTemplate
-                                        .getDag()
-                                        .getTasks()
-                                        .stream())
-                                    .filter((DagTask dagTask) -> displayName.equals(dagTask.getName()))
-                                    .flatMap((DagTask dagTask) -> dagTask.getArguments().getParameters().stream())
-                                    .filter((Parameter parameter) -> parameter.getName().equals(GRAPH_ID))
-                                    .collect(Collectors.toMap(Parameter::getValue,
-                                                              (Parameter parameter) -> nodeStatus.getPhase())));
+                        .stream()
+                        .filter((Template storedTemplate) -> Constants.DAG_TEMPLATE_NAME.equals(
+                                storedTemplate.getName()))
+                        .flatMap((Template storedTemplate) -> storedTemplate
+                                .getDag()
+                                .getTasks()
+                                .stream())
+                        .filter((DagTask dagTask) -> displayName.equals(dagTask.getName()))
+                        .flatMap((DagTask dagTask) -> dagTask.getArguments().getParameters().stream())
+                        .filter((Parameter parameter) -> parameter.getName().equals(GRAPH_ID))
+                        .collect(Collectors.toMap(Parameter::getValue,
+                                (Parameter parameter) -> nodeStatus.getPhase())));
             }
         }
         WorkflowSpec spec = lastStartedWorkflow.getSpec();
         Map<Predicate<WorkflowSpec>, String> customStatusMap = Map.of((WorkflowSpec::isSuspend),
-                                                                      K8sUtils.SUSPENDED_STATUS,
-                                                                      ((WorkflowSpec s) -> K8sUtils.SHUTDOWN_TERMINATE.equals(
-                                                                          s.getShutdown())),
-                                                                      K8sUtils.TERMINATED_STATUS,
-                                                                      ((WorkflowSpec s) -> K8sUtils.SHUTDOWN_STOP.equals(
-                                                                          s.getShutdown())),
-                                                                      K8sUtils.STOPPED_STATUS);
+                K8sUtils.SUSPENDED_STATUS,
+                ((WorkflowSpec s) -> K8sUtils.SHUTDOWN_TERMINATE.equals(
+                        s.getShutdown())),
+                K8sUtils.TERMINATED_STATUS,
+                ((WorkflowSpec s) -> K8sUtils.SHUTDOWN_STOP.equals(
+                        s.getShutdown())),
+                K8sUtils.STOPPED_STATUS);
         if (lastStartedWorkflow.getSpec() != null) {
             Optional<Map.Entry<Predicate<WorkflowSpec>, String>> customStatus = customStatusMap
-                .entrySet()
-                .stream()
-                .filter(predicateStringEntry -> predicateStringEntry.getKey().test(spec))
-                .findFirst();
+                    .entrySet()
+                    .stream()
+                    .filter(predicateStringEntry -> predicateStringEntry.getKey().test(spec))
+                    .findFirst();
             customStatus.ifPresent((Map.Entry<Predicate<WorkflowSpec>, String> predicateStringEntry) -> runtimeData.setStatus(
-                predicateStringEntry.getValue()));
+                    predicateStringEntry.getValue()));
         }
         return runtimeData;
     }
@@ -1466,17 +1476,17 @@ public class PipelineService {
      * @param workflowTemplate workflow template
      */
     private void appendRuntimeInfo(
-        String projectId, String id, PipelineOverviewDto dto, WorkflowTemplate workflowTemplate) {
+            String projectId, String id, PipelineOverviewDto dto, WorkflowTemplate workflowTemplate) {
         try {
             RuntimeData runtimeData = getRunTimeData(projectId, id, workflowTemplate.getSpec().getTemplates());
             dto
-                .startedAt(runtimeData.getStartedAt())
-                .finishedAt(runtimeData.getFinishedAt())
-                .status(runtimeData.getStatus())
-                .progress(runtimeData.getProgress())
-                .jobsStatuses(runtimeData.getJobsStatuses());
+                    .startedAt(runtimeData.getStartedAt())
+                    .finishedAt(runtimeData.getFinishedAt())
+                    .status(runtimeData.getStatus())
+                    .progress(runtimeData.getProgress())
+                    .jobsStatuses(runtimeData.getJobsStatuses());
         } catch (ResourceNotFoundException e) {
-            LOGGER.info("Pipeline {} has not started yet", id);
+            LOGGER.warn("Pipeline {} has not started yet", id);
         }
     }
 
@@ -1495,12 +1505,12 @@ public class PipelineService {
             ObjectMeta metadata = workflowTemplate.getMetadata();
             String id = metadata.getName();
             PipelineOverviewDto pipelineOverviewDto = new PipelineOverviewDto()
-                .id(id)
-                .name(metadata.getLabels().get(Constants.NAME))
-                .tags(checkIfTagsExistsInTemplate(workflowTemplate.getSpec().getPipelineParams()))
-                .dependentPipelineIds(checkIfDependsExistsInTemplate(workflowTemplate.getSpec().getPipelineParams()))
-                .status(K8sUtils.DRAFT_STATUS)
-                .lastModified(metadata.getAnnotations().get(Constants.LAST_MODIFIED));
+                    .id(id)
+                    .name(metadata.getLabels().get(Constants.NAME))
+                    .tags(checkIfTagsExistsInTemplate(workflowTemplate.getSpec().getPipelineParams()))
+                    .dependentPipelineIds(checkIfDependsExistsInTemplate(workflowTemplate.getSpec().getPipelineParams()))
+                    .status(K8sUtils.DRAFT_STATUS)
+                    .lastModified(metadata.getAnnotations().get(Constants.LAST_MODIFIED));
             if (argoKubernetesService.isCronWorkflowReadyOrExist(projectId, id)) {
                 pipelineOverviewDto.cron(true);
                 pipelineOverviewDto.cronSuspend(argoKubernetesService.getCronWorkflow(projectId, id)
@@ -1511,17 +1521,17 @@ public class PipelineService {
             }
             appendRuntimeInfo(projectId, id, pipelineOverviewDto, workflowTemplate);
             appendRunnable(getDagTaskFromWorkflowTemplateSpec(workflowTemplate.getSpec()),
-                           pipelineOverviewDto,
-                           accessibleToRun);
+                    pipelineOverviewDto,
+                    accessibleToRun);
 
             pipelinesList.add(pipelineOverviewDto);
         }
 
         return PipelineOverviewListDto
-            .builder()
-            .pipelines(pipelinesList)
-            .editable(isArgoResourceEditable(projectId, "workflowtemplates", Constants.UPDATE_ACTION))
-            .build();
+                .builder()
+                .pipelines(pipelinesList)
+                .editable(isArgoResourceEditable(projectId, "workflowtemplates", Constants.UPDATE_ACTION))
+                .build();
     }
 
     private boolean isArgoResourceEditable(String projectId, String resource, String action) {
@@ -1558,8 +1568,8 @@ public class PipelineService {
 
         List<String> foundParams = ProjectService.findParamsKeysInString(definition.toString());
         List<ParamDto> existingParams = projectService.getParams(projectId).getParams();
-        for(ParamDto param : existingParams) {
-            if(foundParams.contains(param.getKey())) {
+        for (ParamDto param : existingParams) {
+            if (foundParams.contains(param.getKey())) {
                 param.getValue().getPipUsages().add(id);
             } else {
                 param.getValue().getPipUsages().remove(id);
@@ -1579,7 +1589,7 @@ public class PipelineService {
         if (dependencyHandlerService.pipelineHasDepends(workflowTemplate)) {
             dependencyHandlerService.deleteDependencies(projectId, pipelineId,
                     dependencyHandlerService.getNodesByDefinition(
-                            dependencyHandlerService.getDefinition(workflowTemplate)));
+                            DependencyHandlerService.getDefinition(workflowTemplate)));
             argoKubernetesService.deleteWorkflowTemplate(projectId, pipelineId);
             argoKubernetesService.deleteWorkflow(projectId, pipelineId);
             argoKubernetesService.deleteSecretsByLabels(projectId,
@@ -1606,7 +1616,7 @@ public class PipelineService {
         List<ParamDto> allParams = projectService.getParams(projectId).getParams();
         allParams.forEach(param -> param.getValue().getJobUsages().clear());
         List<PipelineOverviewDto> allPips = getAll(projectId).getPipelines();
-        for(PipelineOverviewDto pipOverviewDto: allPips) {
+        for (PipelineOverviewDto pipOverviewDto : allPips) {
             PipelineResponseDto pipDto = getById(projectId, pipOverviewDto.getId());
             List<String> foundParams = ProjectService.findParamsKeysInString(pipDto.getDefinition().toString());
             if (!foundParams.isEmpty()) {
@@ -1634,11 +1644,11 @@ public class PipelineService {
         argoKubernetesService.deleteWorkflow(projectId, id);
         Workflow workflow = new Workflow();
         workflow.setMetadata(new ObjectMetaBuilder()
-            .withName(id)
-            .addToLabels(Constants.TYPE, Constants.TYPE_PIPELINE)
-            .addToLabels(Constants.STARTED_BY, authenticationService.getUserInfo().getUsername())
-            .addToLabels(Constants.PIPELINE_NAME_LABEL, workflowTemplate.getMetadata().getLabels().get("name"))
-            .build()
+                .withName(id)
+                .addToLabels(Constants.TYPE, Constants.TYPE_PIPELINE)
+                .addToLabels(Constants.STARTED_BY, authenticationService.getUserInfo().getUsername())
+                .addToLabels(Constants.PIPELINE_NAME_LABEL, workflowTemplate.getMetadata().getLabels().get("name"))
+                .build()
         );
         workflow.setSpec(new WorkflowSpec().workflowTemplateRef(new WorkflowTemplateRef().name(id)));
         workflowService.trackWorkflowEvents(projectId, id);
@@ -1653,14 +1663,14 @@ public class PipelineService {
      */
     public void suspend(String projectId, String id) {
         performArgoAction(projectId,
-                          id,
-                          ((RuntimeData data) -> List
-                              .of(K8sUtils.PENDING_STATUS, K8sUtils.RUNNING_STATUS)
-                              .contains(data.getStatus())),
-                          "You cannot suspend pipeline that hasn't been run",
-                          (String pId, String i) -> apiInstance.workflowServiceSuspendWorkflow(pId,
-                                                                                               i,
-                                                                                               new WorkflowSuspendRequest()));
+                id,
+                ((RuntimeData data) -> List
+                        .of(K8sUtils.PENDING_STATUS, K8sUtils.RUNNING_STATUS)
+                        .contains(data.getStatus())),
+                "You cannot suspend pipeline that hasn't been run",
+                (String pId, String i) -> apiInstance.workflowServiceSuspendWorkflow(pId,
+                        i,
+                        new WorkflowSuspendRequest()));
     }
 
     /**
@@ -1671,12 +1681,12 @@ public class PipelineService {
      */
     public void resume(String projectId, String id) {
         performArgoAction(projectId,
-                          id,
-                          ((RuntimeData data) -> K8sUtils.SUSPENDED_STATUS.equals(data.getStatus())),
-                          "You cannot resume pipeline that hasn't been suspended",
-                          (String pId, String i) -> apiInstance.workflowServiceResumeWorkflow(pId,
-                                                                                              i,
-                                                                                              new WorkflowResumeRequest()));
+                id,
+                ((RuntimeData data) -> K8sUtils.SUSPENDED_STATUS.equals(data.getStatus())),
+                "You cannot resume pipeline that hasn't been suspended",
+                (String pId, String i) -> apiInstance.workflowServiceResumeWorkflow(pId,
+                        i,
+                        new WorkflowResumeRequest()));
     }
 
     /**
@@ -1724,7 +1734,7 @@ public class PipelineService {
      */
     public List<PipelineHistoryResponseDto> getPipelineHistory(String projectId, String pipelineId) {
         Map<String, PipelineHistory> pipelineHistories = pipelineHistoryRepository.findAll(
-                String.format("%s:%s_%s",PIPELINE_HISTORY, projectId, pipelineId)
+                String.format("%s:%s_%s", PIPELINE_HISTORY, projectId, pipelineId)
         );
 
         return pipelineHistories
@@ -1739,9 +1749,9 @@ public class PipelineService {
                         .finishedAt(pipelineHistory.getValue().getFinishedAt())
                         .startedBy(pipelineHistory.getValue().getStartedBy())
                         .nodes(getPipelineNodesHistory(
-                                        pipelineHistory.getValue().getNodes(),
-                                        projectId,
-                                        pipelineHistory.getKey()
+                                pipelineHistory.getValue().getNodes(),
+                                projectId,
+                                pipelineHistory.getKey()
                         ))
                         .build()
                 )
@@ -1763,7 +1773,7 @@ public class PipelineService {
     ) {
         List<PipelineNodesHistoryResponseDto> pipelineNodesHistoryResponse = new ArrayList<>();
 
-        for (String node: nodes) {
+        for (String node : nodes) {
             Map<String, PipelineNodeHistory> pipelineNodesHistory = pipelineHistoryRepository.findAll(
                     String.format("%s:%s_%s_%s", PIPELINE_NODE_HISTORY, projectId, node, pipelineHistoryId)
             );
@@ -1837,14 +1847,14 @@ public class PipelineService {
      */
     public void stop(String projectId, String id) {
         performArgoAction(projectId,
-                          id,
-                          ((RuntimeData data) -> List
-                              .of(K8sUtils.RUNNING_STATUS, K8sUtils.SUSPENDED_STATUS, K8sUtils.PENDING_STATUS)
-                              .contains(data.getStatus())),
-                          "You cannot stop pipeline that hasn't been started " + "or suspended",
-                          (String pId, String i) -> apiInstance.workflowServiceStopWorkflow(pId,
-                                                                                            i,
-                                                                                            new WorkflowStopRequest()));
+                id,
+                ((RuntimeData data) -> List
+                        .of(K8sUtils.RUNNING_STATUS, K8sUtils.SUSPENDED_STATUS, K8sUtils.PENDING_STATUS)
+                        .contains(data.getStatus())),
+                "You cannot stop pipeline that hasn't been started " + "or suspended",
+                (String pId, String i) -> apiInstance.workflowServiceStopWorkflow(pId,
+                        i,
+                        new WorkflowStopRequest()));
     }
 
     /**
@@ -1855,14 +1865,14 @@ public class PipelineService {
      */
     public void retry(String projectId, String id) {
         performArgoAction(projectId,
-                          id,
-                          ((RuntimeData data) -> List
-                              .of(K8sUtils.FAILED_STATUS, K8sUtils.ERROR_STATUS)
-                              .contains(data.getStatus())),
-                          "You cannot retry pipeline that hasn't failed",
-                          (String pId, String i) -> apiInstance.workflowServiceRetryWorkflow(pId,
-                                                                                             i,
-                                                                                             new WorkflowRetryRequest()));
+                id,
+                ((RuntimeData data) -> List
+                        .of(K8sUtils.FAILED_STATUS, K8sUtils.ERROR_STATUS)
+                        .contains(data.getStatus())),
+                "You cannot retry pipeline that hasn't failed",
+                (String pId, String i) -> apiInstance.workflowServiceRetryWorkflow(pId,
+                        i,
+                        new WorkflowRetryRequest()));
     }
 
     /**
@@ -1875,7 +1885,7 @@ public class PipelineService {
      * @param action           custom argo action
      */
     private void performArgoAction(
-        String projectId, String id, Predicate<RuntimeData> check, String onFailedCheckMsg, ArgoAction action) {
+            String projectId, String id, Predicate<RuntimeData> check, String onFailedCheckMsg, ArgoAction action) {
         WorkflowTemplate workflowTemplate = argoKubernetesService.getWorkflowTemplate(projectId, id);
         try {
             RuntimeData runtimeData = getRunTimeData(projectId, id, workflowTemplate.getSpec().getTemplates());
@@ -1899,104 +1909,104 @@ public class PipelineService {
      * @param workflowTemplate workflow template
      */
     private void validateResourceAvailability(
-        ResourceQuota quota, WorkflowTemplate workflowTemplate) {
+            ResourceQuota quota, WorkflowTemplate workflowTemplate) {
         BigDecimal executorLimitsCpu =
-            Quantity.getAmountInBytes(Quantity.parse(argoKubernetesService.getArgoExecutorLimitsCpu()));
+                Quantity.getAmountInBytes(Quantity.parse(argoKubernetesService.getArgoExecutorLimitsCpu()));
         BigDecimal executorLimitsMemory =
-            Quantity.getAmountInBytes(Quantity.parse(argoKubernetesService.getArgoExecutorLimitsMemory()));
+                Quantity.getAmountInBytes(Quantity.parse(argoKubernetesService.getArgoExecutorLimitsMemory()));
         BigDecimal executorRequestsCpu =
-            Quantity.getAmountInBytes(Quantity.parse(argoKubernetesService.getArgoExecutorRequestsCpu()));
+                Quantity.getAmountInBytes(Quantity.parse(argoKubernetesService.getArgoExecutorRequestsCpu()));
         BigDecimal executorRequestsMemory =
-            Quantity.getAmountInBytes(Quantity.parse(argoKubernetesService.getArgoExecutorRequestsMemory()));
+                Quantity.getAmountInBytes(Quantity.parse(argoKubernetesService.getArgoExecutorRequestsMemory()));
         BigDecimal limitsCpu = Quantity
-            .getAmountInBytes(quota.getStatus().getHard().get(Constants.LIMITS_CPU))
-            .subtract(executorLimitsCpu);
+                .getAmountInBytes(quota.getStatus().getHard().get(Constants.LIMITS_CPU))
+                .subtract(executorLimitsCpu);
         BigDecimal limitsMemory = Quantity
-            .getAmountInBytes(quota.getStatus().getHard().get(Constants.LIMITS_MEMORY))
-            .subtract(executorLimitsMemory);
+                .getAmountInBytes(quota.getStatus().getHard().get(Constants.LIMITS_MEMORY))
+                .subtract(executorLimitsMemory);
         BigDecimal requestsCpu = Quantity
-            .getAmountInBytes(quota.getStatus().getHard().get(Constants.REQUESTS_CPU))
-            .subtract(executorRequestsCpu);
+                .getAmountInBytes(quota.getStatus().getHard().get(Constants.REQUESTS_CPU))
+                .subtract(executorRequestsCpu);
         BigDecimal requestsMemory = Quantity
-            .getAmountInBytes(quota.getStatus().getHard().get(Constants.REQUESTS_MEMORY))
-            .subtract(executorRequestsMemory);
+                .getAmountInBytes(quota.getStatus().getHard().get(Constants.REQUESTS_MEMORY))
+                .subtract(executorRequestsMemory);
         workflowTemplate
-            .getSpec()
-            .getTemplates()
-            .stream()
-            .filter((Template temp) -> NOTIFICATION_TEMPLATE_NAME.equals(temp.getName()))
-            .findAny()
-            .ifPresent((Template notificationTemplate) -> {
-                ResourceRequirements resources = notificationTemplate.getContainer().getResources();
-                Map<String, Quantity> limits = resources.getLimits();
-                Map<String, Quantity> requests = resources.getRequests();
-                BigDecimal limMemory = Quantity.getAmountInBytes(limits.get(Constants.MEMORY_FIELD));
-                BigDecimal limCpu = Quantity.getAmountInBytes(limits.get(Constants.CPU_FIELD));
-                BigDecimal reqMemory = Quantity.getAmountInBytes(requests.get(Constants.MEMORY_FIELD));
-                BigDecimal reqCpu = Quantity.getAmountInBytes(requests.get(Constants.CPU_FIELD));
-                compareResourceSettings(limitsCpu,
-                                        limitsMemory,
-                                        limCpu,
-                                        limMemory,
-                                        "notification stage",
-                                        "limits");
-                compareResourceSettings(requestsCpu,
-                                        requestsMemory,
-                                        reqCpu,
-                                        reqMemory,
-                                        "notification stage",
-                                        "request");
-            });
+                .getSpec()
+                .getTemplates()
+                .stream()
+                .filter((Template temp) -> NOTIFICATION_TEMPLATE_NAME.equals(temp.getName()))
+                .findAny()
+                .ifPresent((Template notificationTemplate) -> {
+                    ResourceRequirements resources = notificationTemplate.getContainer().getResources();
+                    Map<String, Quantity> limits = resources.getLimits();
+                    Map<String, Quantity> requests = resources.getRequests();
+                    BigDecimal limMemory = Quantity.getAmountInBytes(limits.get(Constants.MEMORY_FIELD));
+                    BigDecimal limCpu = Quantity.getAmountInBytes(limits.get(Constants.CPU_FIELD));
+                    BigDecimal reqMemory = Quantity.getAmountInBytes(requests.get(Constants.MEMORY_FIELD));
+                    BigDecimal reqCpu = Quantity.getAmountInBytes(requests.get(Constants.CPU_FIELD));
+                    compareResourceSettings(limitsCpu,
+                            limitsMemory,
+                            limCpu,
+                            limMemory,
+                            "notification stage",
+                            "limits");
+                    compareResourceSettings(requestsCpu,
+                            requestsMemory,
+                            reqCpu,
+                            reqMemory,
+                            "notification stage",
+                            "request");
+                });
         workflowTemplate
-            .getSpec()
-            .getTemplates()
-            .stream()
-            .map(Template::getDag)
-            .filter(Objects::nonNull)
-            .findAny()
-            .map(DagTemplate::getTasks)
-            .ifPresentOrElse((List<DagTask> dagTasks) -> dagTasks.forEach((DagTask dagTask) -> {
-                if (NOTIFICATION_TEMPLATE_NAME.equals(dagTask.getTemplate())) {
-                    return;
-                }
-                if (PIPELINE_TEMPLATE_NAME.equals(dagTask.getTemplate())) {
-                    return;
-                }
-                Map<String, Parameter> parameters = dagTask
-                    .getArguments()
-                    .getParameters()
-                    .stream()
-                    .collect(Collectors.toMap(Parameter::getName, Function.identity()));
-                BigDecimal stageLimitMemory =
-                    Quantity.getAmountInBytes(Quantity.parse(parameters.get(LIMITS_MEMORY).getValue()));
-                BigDecimal stageLimitCpu =
-                    Quantity.getAmountInBytes(Quantity.parse(parameters.get(LIMITS_CPU).getValue()));
-                BigDecimal stageRequestMemory =
-                    Quantity.getAmountInBytes(Quantity.parse(parameters.get(REQUESTS_MEMORY).getValue()));
-                BigDecimal stageRequestCpu =
-                    Quantity.getAmountInBytes(Quantity.parse(parameters.get(REQUESTS_CPU).getValue()));
-                compareResourceSettings(limitsCpu,
-                                        limitsMemory,
-                                        stageLimitCpu,
-                                        stageLimitMemory,
-                                        dagTask.getTemplate(),
-                                        "limits");
-                compareResourceSettings(requestsCpu,
-                                        requestsMemory,
-                                        stageRequestCpu,
-                                        stageRequestMemory,
-                                        dagTask.getTemplate(),
-                                        "request");
-            }), () -> {
-                throw new BadRequestException(String.format("Dag template was not found for pipeline %s",
-                                                            workflowTemplate.getMetadata().getName()));
-            });
+                .getSpec()
+                .getTemplates()
+                .stream()
+                .map(Template::getDag)
+                .filter(Objects::nonNull)
+                .findAny()
+                .map(DagTemplate::getTasks)
+                .ifPresentOrElse((List<DagTask> dagTasks) -> dagTasks.forEach((DagTask dagTask) -> {
+                    if (NOTIFICATION_TEMPLATE_NAME.equals(dagTask.getTemplate())) {
+                        return;
+                    }
+                    if (PIPELINE_TEMPLATE_NAME.equals(dagTask.getTemplate())) {
+                        return;
+                    }
+                    Map<String, Parameter> parameters = dagTask
+                            .getArguments()
+                            .getParameters()
+                            .stream()
+                            .collect(Collectors.toMap(Parameter::getName, Function.identity()));
+                    BigDecimal stageLimitMemory =
+                            Quantity.getAmountInBytes(Quantity.parse(parameters.get(LIMITS_MEMORY).getValue()));
+                    BigDecimal stageLimitCpu =
+                            Quantity.getAmountInBytes(Quantity.parse(parameters.get(LIMITS_CPU).getValue()));
+                    BigDecimal stageRequestMemory =
+                            Quantity.getAmountInBytes(Quantity.parse(parameters.get(REQUESTS_MEMORY).getValue()));
+                    BigDecimal stageRequestCpu =
+                            Quantity.getAmountInBytes(Quantity.parse(parameters.get(REQUESTS_CPU).getValue()));
+                    compareResourceSettings(limitsCpu,
+                            limitsMemory,
+                            stageLimitCpu,
+                            stageLimitMemory,
+                            dagTask.getTemplate(),
+                            "limits");
+                    compareResourceSettings(requestsCpu,
+                            requestsMemory,
+                            stageRequestCpu,
+                            stageRequestMemory,
+                            dagTask.getTemplate(),
+                            "request");
+                }), () -> {
+                    throw new BadRequestException(String.format("Dag template was not found for pipeline %s",
+                            workflowTemplate.getMetadata().getName()));
+                });
     }
 
     /**
      * Get last started workflow from the list of workflows
      *
-     * @param  workflows   list of cron workflows
+     * @param workflows list of cron workflows
      * @return last started workflow
      */
     protected Workflow getLastStartedWorkflow(List<Workflow> workflows) {
@@ -2044,7 +2054,7 @@ public class PipelineService {
     }
 
     private static List<String> parseDependenciesAsList(String dependencies) {
-        if(dependencies != null) {
+        if (dependencies != null) {
             return Arrays.asList(dependencies.split(Pattern.quote(" && ")));
         }
         return Collections.emptyList();

@@ -18,63 +18,46 @@
  */
 package by.iba.vfapi.model.argo;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import lombok.Getter;
-import lombok.Setter;
 import lombok.EqualsAndHashCode;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.io.Serializable;
 
 /**
- * Volumes in container.
+ * Key to path for configmap.
  */
+@NoArgsConstructor
 @Getter
 @Setter
-@NoArgsConstructor
 @EqualsAndHashCode
-public class Volumes implements Serializable {
+public class KeyToPath implements Serializable {
 
-    private static final long serialVersionUID = 1;
-
-    private String name;
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    private PersistentVolumeClaim persistentVolumeClaim;
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    private ConfigMap configMap;
+    private static final long serialVersionUID = 1L;
+    private String key;
+    private String path;
 
     /**
-     * Setter for name.
+     * Setter for key.
      *
-     * @param name name
+     * @param key key
      * @return this
      */
-    public Volumes name(String name) {
-        this.name = name;
+    public KeyToPath key(String key) {
+        this.key = key;
         return this;
     }
 
     /**
-     * Setter for persistentVolumeClaim.
+     * Setter for path.
      *
-     * @param persistentVolumeClaim persistent volume claim
+     * @param path path
      * @return this
      */
-    public Volumes persistentVolumeClaim(PersistentVolumeClaim persistentVolumeClaim) {
-        this.persistentVolumeClaim = persistentVolumeClaim;
-        return this;
-    }
-
-    /**
-     * Setter for configMap.
-     *
-     * @param configMap configMap
-     * @return this
-     */
-    public Volumes configMap(ConfigMap configMap) {
-        this.configMap = configMap;
+    public KeyToPath path(String path) {
+        this.path = path;
         return this;
     }
 }
+

@@ -39,7 +39,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-public class DatabasesControllerTest {
+class DatabasesControllerTest {
 
     @Mock
     private DatabasesService databasesService;
@@ -62,7 +62,7 @@ public class DatabasesControllerTest {
     }
 
     @Test
-    public void testPing() {
+    void testPing() {
         String projectId = "project";
         String connectionName = "con";
         ConnectDto dto = Mockito.mock(ConnectDto.class);
@@ -77,7 +77,7 @@ public class DatabasesControllerTest {
     }
 
     @Test
-    public void testPing2() {
+    void testPingWithParams() {
         String projectId = "project";
         ConnectDto dto = Mockito.mock(ConnectDto.class);
         when(databasesService.replaceParams(projectId, dto)).thenReturn(dto);

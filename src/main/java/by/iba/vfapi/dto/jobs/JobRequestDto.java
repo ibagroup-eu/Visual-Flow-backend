@@ -70,12 +70,9 @@ public class JobRequestDto {
      * @param id job id
      * @return new cm
      */
-    public ConfigMap toConfigMap(String id) {
-        GraphDto graphDto = GraphDto.parseGraph(definition);
-        validateGraph(graphDto);
-
-        Map<String, String> configMapData = new HashMap<>(graphDto.createConfigMapData());
-        configMapData.putAll(toMap(params));
+    public ConfigMap toConfigMap(String id, String jobDataFilePath) {
+        Map<String, String> configMapData = new HashMap<>(toMap(params));
+        configMapData.put(Constants.JOB_CONFIG_PATH_FIELD, jobDataFilePath);
 
         configMapData.replace(Constants.EXECUTOR_MEMORY,
                               configMapData.get(Constants.EXECUTOR_MEMORY) + Constants.GIGABYTE_QUANTITY);
@@ -93,6 +90,27 @@ public class JobRequestDto {
             .addToAnnotations(Constants.LAST_MODIFIED, ZonedDateTime.now().format(Constants.DATE_TIME_FORMATTER))
             .endMetadata()
             .build();
+    }
+
+    /**
+     * Creating job data cm.
+     *
+     * @param jobId jobId
+     * @return new job data cm
+     */
+    public ConfigMap toJobDataConfigMap(String jobId) {
+        GraphDto graphDto = GraphDto.parseGraph(definition);
+        validateGraph(graphDto);
+
+        return new ConfigMapBuilder()
+                .addToData(graphDto.createConfigMapData())
+                .withNewMetadata()
+                .withName(jobId + Constants.JOB_CONFIG_SUFFIX)
+                .addToLabels(Constants.PARENT, name)
+                .addToLabels(Constants.TYPE, Constants.TYPE_JOB_CONFIG)
+                .addToAnnotations(Constants.LAST_MODIFIED, ZonedDateTime.now().format(Constants.DATE_TIME_FORMATTER))
+                .endMetadata()
+                .build();
     }
 
     /**

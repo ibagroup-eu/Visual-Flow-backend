@@ -9,17 +9,10 @@
     </suppress>
     <suppress>
         <notes><![CDATA[
-   file name: spring-web-5.3.25.jar
+   file name: spring-web-5.3.27.jar
    ]]></notes>
-        <packageUrl>pkg:maven/org.springframework/spring-web@5.3.25</packageUrl>
+        <packageUrl>pkg:maven/org.springframework/spring-web@5.3.27</packageUrl>
         <cve>CVE-2016-1000027</cve>
-    </suppress>
-    <suppress>
-        <notes><![CDATA[
-   file name: spring-webmvc-5.3.25.jar
-   ]]></notes>
-        <packageUrl>pkg:maven/org.springframework/spring-webmvc@5.3.25</packageUrl>
-        <cve>CVE-2023-20860</cve>
     </suppress>
     <suppress>
         <notes><![CDATA[
@@ -27,5 +20,12 @@
     ]]></notes>
         <packageUrl>pkg:maven/org.yaml/snakeyaml@1.30</packageUrl>
         <cve>CVE-2022-1471</cve>
+    </suppress>
+    <suppress>
+        <notes><![CDATA[
+    file name: argo-client-java-v3.0.1.jar
+    ]]></notes>
+        <packageUrl regex="true">^pkg:.*/io\.argoproj\.workflow/argo\-client\-java@.*$</packageUrl>
+        <cve>CVE-2023-27162</cve>
     </suppress>
 </suppressions>

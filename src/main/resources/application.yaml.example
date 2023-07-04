@@ -99,6 +99,8 @@ job:
     image:                                        # path to spark docker image in format repository:tag
     serviceAccount:                               # spark user service account. Backend copies this user to each new namespace(app project)
     roleBinding:                                  # role binding for spark user. Backend copies this role binding to each new namespace(app project)
+  config:
+    mountPath:                                    # place in the container where the job's json data file will be stored
 argo:
   serverUrl: ${ARGO_SERVER_URL}                   # URL of argo server connected to Kubernetes
   limits:                                         # limits resource quota for argo executor

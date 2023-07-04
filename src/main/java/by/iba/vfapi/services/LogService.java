@@ -130,7 +130,7 @@ public class LogService {
 
             return logResults;
         } catch (ResourceNotFoundException e) {
-            LOGGER.info(NO_POD_MESSAGE, e);
+            LOGGER.error(NO_POD_MESSAGE, e);
             return Collections.emptyList();
         }
     }

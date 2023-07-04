@@ -71,9 +71,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -148,7 +146,7 @@ class JobServiceTest {
     @BeforeEach
     void setUp() {
         this.jobService = new JobService("image", "master", "spark", "pullSecret", "mountPath",
-            kubernetesService, dependencyHandlerService, argoKubernetesService, authenticationService, podService, projectService, historyRepository);
+                "/job-config", kubernetesService, dependencyHandlerService, argoKubernetesService, authenticationService, podService, projectService, historyRepository);
     }
 
     @Test
@@ -177,15 +175,17 @@ class JobServiceTest {
                 .definition(GRAPH)
                 .build());
 
-        assertEquals("1G",
-                     captor.getValue().getData().get(Constants.EXECUTOR_MEMORY),
-                     "Executor memory must be equals to expected");
-        assertEquals("1G",
-                     captor.getValue().getData().get(Constants.DRIVER_MEMORY),
-                     "Driver memory must be equals to expected");
+        verify(kubernetesService, times(2)).createOrReplaceConfigMap(anyString(), any(ConfigMap.class));
+        verify(kubernetesService, times(3)).getConfigMap(anyString(), anyString());
 
-        verify(kubernetesService).createOrReplaceConfigMap(anyString(), any(ConfigMap.class));
-        verify(kubernetesService, times(2)).getConfigMap(anyString(), anyString());
+        assertEquals("1G",
+                captor.getAllValues().get(0).getData().get(Constants.EXECUTOR_MEMORY),
+                "Executor memory must be equal to expected");
+        assertEquals("1G",
+                captor.getAllValues().get(0).getData().get(Constants.DRIVER_MEMORY),
+                "Driver memory must be equal to expected");
+        assertNotNull(captor.getAllValues().get(1).getData().get(Constants.JOB_CONFIG_FIELD),
+                "Graph should exists in other configmap");
     }
 
     @Test
@@ -219,8 +219,8 @@ class JobServiceTest {
                         "1G",
                         Constants.DRIVER_MEMORY,
                         "1G",
-                        Constants.JOB_CONFIG_FIELD,
-                        "{\"nodes\":[], \"edges\":[]}"))
+                        Constants.JOB_CONFIG_PATH_FIELD,
+                        "\\test-config\\test.json"))
                 .withNewMetadata()
                 .withName("jobId1")
                 .addToLabels(Constants.NAME, "jobName2")
@@ -250,7 +250,7 @@ class JobServiceTest {
                               .name("newName")
                               .build());
 
-        verify(kubernetesService).createOrReplaceConfigMap(anyString(), any(ConfigMap.class));
+        verify(kubernetesService, times(2)).createOrReplaceConfigMap(anyString(), any(ConfigMap.class));
         verify(kubernetesService).deletePod(anyString(), anyString());
         verify(kubernetesService).deletePodsByLabels(anyString(), anyMap());
     }
@@ -276,6 +276,7 @@ class JobServiceTest {
         when(argoKubernetesService.getConfigMap("projectId", "id")).thenReturn(configMap);
         when(dependencyHandlerService.jobHasDepends(any(ConfigMap.class))).thenReturn(true);
 
+        doNothing().when(kubernetesService).deleteConfigMap("projectId", "id-cfg");
         doNothing().when(kubernetesService).deleteConfigMap("projectId", "id");
         doNothing().when(kubernetesService).deletePodsByLabels("projectId", Map.of(Constants.JOB_ID_LABEL, "id"));
         when(projectService.getParams("projectId")).thenReturn(ParamsDto.builder().params(new LinkedList<>()).build());
@@ -291,10 +292,8 @@ class JobServiceTest {
         List<ConfigMap> configMaps = List.of(new ConfigMapBuilder()
                                                  .addToData(Map.of(Constants.TAGS,
                                                          "value1",
-                                                         Constants.JOB_CONFIG_FIELD,
-                                                                   "{\"nodes\":[{\"id\": \"id\", \"value\": " +
-                                                                       "{}}], " +
-                                                                       "\"edges\":[]}"))
+                                                         Constants.JOB_CONFIG_PATH_FIELD,
+                                                         "\\job-config\\test.json"))
                                                  .withMetadata(new ObjectMetaBuilder()
                                                                    .withName("id1")
                                                                    .addToLabels(Constants.NAME, "name1")
@@ -304,7 +303,19 @@ class JobServiceTest {
                                                                                          "data".getBytes()))
                                                                    .build())
                                                  .build());
-
+        ConfigMap jobData = new ConfigMapBuilder()
+                .addToData(Map.of(Constants.JOB_CONFIG_FIELD,
+                        "{\"nodes\":[{\"id\": \"id\", \"value\": " +
+                                "{}}], " +
+                                "\"edges\":[]}"))
+                .withNewMetadata()
+                .withName("id1-cfg")
+                .addToLabels(Constants.NAME, "name1")
+                .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
+                .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
+                .endMetadata()
+                .build();
+        when(kubernetesService.getConfigMap("projectId", "id1-cfg")).thenReturn(jobData);
         when(kubernetesService.getAllConfigMaps("projectId")).thenReturn(configMaps);
         when(kubernetesService.getPodStatus("projectId", "id1")).thenReturn(new PodStatusBuilder()
                                                                                 .withPhase("Pending")
@@ -404,8 +415,8 @@ class JobServiceTest {
                               "1G",
                               Constants.TAGS,
                               "value1,value2",
-                              Constants.JOB_CONFIG_FIELD,
-                              "{\"nodes\":[], \"edges\":[]}"))
+                    Constants.JOB_CONFIG_PATH_FIELD,
+                    "\\job-config\\test.json"))
             .withNewMetadata()
             .withName("id")
             .addToLabels(Constants.NAME, "name")
@@ -414,6 +425,17 @@ class JobServiceTest {
             .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
             .endMetadata()
             .build();
+        ConfigMap jobData = new ConfigMapBuilder()
+                .addToData(Map.of(Constants.JOB_CONFIG_FIELD,
+                        "{\"nodes\":[], \"edges\":[]}"))
+                .withNewMetadata()
+                .withName("id-cfg")
+                .addToLabels(Constants.NAME, "name")
+                .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
+                .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
+                .endMetadata()
+                .build();
+        when(kubernetesService.getConfigMap("projectId", "id-cfg")).thenReturn(jobData);
         when(kubernetesService.getConfigMap("projectId", "id")).thenReturn(configMap);
         when(kubernetesService.getPodStatus("projectId", "id")).thenReturn(new PodStatusBuilder()
                                                                                .withPhase("Pending")

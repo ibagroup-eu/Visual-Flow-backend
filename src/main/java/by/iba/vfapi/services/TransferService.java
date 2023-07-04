@@ -26,8 +26,8 @@ import by.iba.vfapi.dto.exporting.ExportResponseDto;
 import by.iba.vfapi.dto.exporting.PipelinesWithRelatedJobs;
 import by.iba.vfapi.dto.importing.EntityDto;
 import by.iba.vfapi.dto.importing.ImportResponseDto;
-import by.iba.vfapi.dto.projects.ParamDto;
 import by.iba.vfapi.dto.projects.ConnectDto;
+import by.iba.vfapi.dto.projects.ParamDto;
 import by.iba.vfapi.exceptions.BadRequestException;
 import by.iba.vfapi.model.argo.ImagePullSecret;
 import by.iba.vfapi.model.argo.PipelineParams;
@@ -44,10 +44,15 @@ import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.client.ResourceNotFoundException;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.codec.binary.Base64;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
 import java.io.IOException;
 import java.nio.charset.Charset;
+import java.nio.file.Paths;
 import java.time.ZonedDateTime;
-import java.util.Collections;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -62,17 +67,12 @@ import java.util.function.BiConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.codec.binary.Base64;
-import org.springframework.stereotype.Service;
 
 /**
  * TransferService class.
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 // This class contains a sonar vulnerability - java:S1200: Split this class into smaller and more specialized ones to
 // reduce its dependencies on other classes from 31 to the maximum authorized 30 or less. This means, that this class
 // should not be coupled to too many other classes (Single Responsibility Principle).
@@ -82,7 +82,21 @@ public class TransferService {
     private final JobService jobService;
     private final PipelineService pipelineService;
     private final ProjectService projectService;
-    private final DependencyHandlerService dependencyHandlerService;
+    private final String jobConfigFullPath;
+
+    public TransferService(
+            ArgoKubernetesService argoKubernetesService,
+            JobService jobService,
+            PipelineService pipelineService,
+            ProjectService projectService,
+            @Value("${job.config.mountPath}") String jobConfigMountPath
+    ) {
+        this.argoKubernetesService = argoKubernetesService;
+        this.jobService = jobService;
+        this.pipelineService = pipelineService;
+        this.projectService = projectService;
+        this.jobConfigFullPath = Paths.get(jobConfigMountPath, Constants.JOB_CONFIG_FILE).toString();
+    }
 
     /**
      * Exporting jobs by ids.
@@ -258,9 +272,27 @@ public class TransferService {
                     .put(Constants.LAST_MODIFIED, ZonedDateTime.now().format(Constants.DATE_TIME_FORMATTER));
             try {
                 jobService.checkJobName(projectId, id, name);
-                argoKubernetesService.createOrReplaceConfigMap(projectId, configMap);
                 appendJobsMissingArgs(configMap, missingProjectParams, existingParams);
                 appendJobsMissingArgs(configMap, missingProjectConnections, existingConnections);
+
+                Map<String, String> jobData = new HashMap<>();
+                jobData.put(Constants.JOB_CONFIG_FIELD, configMap.getData().get(Constants.JOB_CONFIG_FIELD));
+                ConfigMap jobDataCm = new ConfigMapBuilder()
+                        .addToData(jobData)
+                        .withNewMetadata()
+                        .withName(id + Constants.JOB_CONFIG_SUFFIX)
+                        .addToLabels(Constants.PARENT, name)
+                        .addToLabels(Constants.TYPE, Constants.TYPE_JOB_CONFIG)
+                        .addToAnnotations(Constants.LAST_MODIFIED,
+                                ZonedDateTime.now().format(Constants.DATE_TIME_FORMATTER))
+                        .endMetadata()
+                        .build();
+
+                configMap.getData().remove(Constants.JOB_CONFIG_FIELD);
+                configMap.getData().putIfAbsent(Constants.JOB_CONFIG_PATH_FIELD, jobConfigFullPath);
+
+                argoKubernetesService.createOrReplaceConfigMap(projectId, configMap);
+                jobService.createFromConfigMap(projectId, jobDataCm, false);
             } catch (BadRequestException ex) {
                 LOGGER.error(ex.getMessage(), ex);
                 notImported.add(id);
@@ -450,7 +482,34 @@ public class TransferService {
         copyEntity(projectId,
                 configMap,
                 (String projId, ConfigMap confMap) -> {
-                    jobService.createFromConfigMap(projId, confMap, false);
+                    Map<String, String> jobData = new HashMap<>();
+                    try {
+                        ConfigMap dataConfigMap = argoKubernetesService.getConfigMap(projectId,
+                                jobId + Constants.JOB_CONFIG_SUFFIX);
+                        jobData = dataConfigMap.getData();
+                    } catch (ResourceNotFoundException e) {
+                        LOGGER.warn("Job configmap {}-cfg has not been found: {}. " +
+                                        "Try to find JOB_CONFIG param in the parent configmap.",
+                                jobId,
+                                e.getLocalizedMessage());
+                        jobData.put(Constants.JOB_CONFIG_FIELD, confMap.getData().get(Constants.JOB_CONFIG_FIELD));
+                    }
+
+                    confMap.getData().remove(Constants.JOB_CONFIG_FIELD);
+                    confMap.getData().putIfAbsent(Constants.JOB_CONFIG_PATH_FIELD, jobConfigFullPath);
+                    String newJobId = jobService.createFromConfigMap(projId, confMap, false);
+
+                    ConfigMap jobDataCm = new ConfigMapBuilder()
+                            .addToData(jobData)
+                            .withNewMetadata()
+                            .addToLabels(Constants.PARENT, confMap.getMetadata().getLabels().get(Constants.NAME))
+                            .withName(newJobId + Constants.JOB_CONFIG_SUFFIX)
+                            .addToLabels(Constants.TYPE, Constants.TYPE_JOB_CONFIG)
+                            .addToAnnotations(Constants.LAST_MODIFIED,
+                                    ZonedDateTime.now().format(Constants.DATE_TIME_FORMATTER))
+                            .endMetadata()
+                            .build();
+                    jobService.createFromConfigMap(projId, jobDataCm, false);
                     projectService.checkConnectionDependencies(projId, confMap.getMetadata().getName(),
                             null, DependencyHandlerService.getDefinition(confMap));
                 },

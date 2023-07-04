@@ -43,6 +43,7 @@ import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.ContainerStateTerminated;
 import io.fabric8.kubernetes.api.model.EnvFromSourceBuilder;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
+import io.fabric8.kubernetes.api.model.KeyToPathBuilder;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
@@ -50,6 +51,13 @@ import io.fabric8.kubernetes.api.model.PodStatus;
 import io.fabric8.kubernetes.api.model.metrics.v1beta1.PodMetrics;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.ResourceNotFoundException;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+
+import javax.validation.Valid;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -58,12 +66,6 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
-import javax.validation.Valid;
-
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Service;
 
 /**
  * JobService class.
@@ -79,6 +81,8 @@ public class JobService {
     private final String jobMaster;
     private final String imagePullSecret;
     private final String pvcMountPath;
+    private final String jobConfigMountPath;
+    private final String jobConfigFullPath;
     private final String serviceAccount;
     private final KubernetesService kubernetesService;
     private final ArgoKubernetesService argoKubernetesService;
@@ -97,6 +101,7 @@ public class JobService {
         @Value("${job.spark.serviceAccount}") final String serviceAccount,
         @Value("${job.imagePullSecret}") final String imagePullSecret,
         @Value("${pvc.mountPath}") final String pvcMountPath,
+        @Value("${job.config.mountPath}") final String jobConfigMountPath,
         KubernetesService kubernetesService,
         DependencyHandlerService dependencyHandlerService,
         ArgoKubernetesService argoKubernetesService,
@@ -109,6 +114,8 @@ public class JobService {
         this.serviceAccount = serviceAccount;
         this.imagePullSecret = imagePullSecret;
         this.pvcMountPath = pvcMountPath;
+        this.jobConfigMountPath = jobConfigMountPath;
+        this.jobConfigFullPath = Paths.get(jobConfigMountPath, Constants.JOB_CONFIG_FILE).toString();
         this.kubernetesService = kubernetesService;
         this.argoKubernetesService = argoKubernetesService;
         this.authenticationService = authenticationService;
@@ -147,10 +154,15 @@ public class JobService {
     public String create(final String projectId, @Valid final JobRequestDto jobRequestDto) {
         String jobName = jobRequestDto.getName();
         checkJobName(projectId, null, jobName);
-        ConfigMap configMap = jobRequestDto.toConfigMap(UUID.randomUUID().toString());
-        String jobId = createFromConfigMap(projectId, configMap, true);
+
+        ConfigMap jobMainCm = jobRequestDto.toConfigMap(UUID.randomUUID().toString(), jobConfigFullPath);
+        String jobId = createFromConfigMap(projectId, jobMainCm, true);
+
+        ConfigMap jobDataCm = jobRequestDto.toJobDataConfigMap(jobId);
+        createFromConfigMap(projectId, jobDataCm, true);
+
         projectService.checkConnectionDependencies(projectId, jobId, null,
-                DependencyHandlerService.getDefinition(configMap));
+                DependencyHandlerService.getDefinition(jobMainCm));
         return jobId;
     }
 
@@ -172,7 +184,7 @@ public class JobService {
             }
             return createFromConfigMap(projectId, configMap, replaceIfExists);
         } catch (ResourceNotFoundException ex) {
-            LOGGER.info("It's ok, there is no job with such id: {}", ex.getLocalizedMessage());
+            LOGGER.warn("It's ok, there is no job with such id: {}", ex.getLocalizedMessage());
             kubernetesService.createOrReplaceConfigMap(projectId, configMap);
             return id;
         }
@@ -190,12 +202,15 @@ public class JobService {
         checkJobName(projectId, id, jobName);
 
         ConfigMap oldConfigMap = kubernetesService.getConfigMap(projectId, id);
-        ConfigMap newConfigMap = new ConfigMapBuilder(jobRequestDto.toConfigMap(id))
+        ConfigMap newConfigMap = new ConfigMapBuilder(jobRequestDto.toConfigMap(id, jobConfigFullPath))
                 .addToData(Constants.DEPENDENT_PIPELINE_IDS,
                         oldConfigMap.getData().get(Constants.DEPENDENT_PIPELINE_IDS))
                 .build();
-
         kubernetesService.createOrReplaceConfigMap(projectId, newConfigMap);
+
+        ConfigMap newConfigDataMap = jobRequestDto.toJobDataConfigMap(id);
+        kubernetesService.createOrReplaceConfigMap(projectId, newConfigDataMap);
+
         projectService.checkConnectionDependencies(projectId, id,
                 DependencyHandlerService.getDefinition(oldConfigMap),
                 DependencyHandlerService.getDefinition(newConfigMap));
@@ -208,7 +223,7 @@ public class JobService {
                                                                    Constants.PIPELINE_JOB_ID_LABEL,
                                                                    Constants.NOT_PIPELINE_FLAG));
         } catch (ResourceNotFoundException e) {
-            LOGGER.info(KubernetesService.NO_POD_MESSAGE, e);
+            LOGGER.error(KubernetesService.NO_POD_MESSAGE, e);
             return;
         }
 
@@ -232,7 +247,8 @@ public class JobService {
      */
     public JobOverviewListDto getAll(final String projectId) {
         List<ConfigMap> allConfigMaps = kubernetesService.getAllConfigMaps(projectId);
-        boolean accessibleToRun = kubernetesService.isAccessible(projectId, "pods", "", Constants.CREATE_ACTION);
+        boolean accessibleToRun = kubernetesService.isAccessible(projectId, "pods", "",
+                Constants.CREATE_ACTION);
 
         List<JobOverviewDto> jobs = new ArrayList<>(allConfigMaps.size());
         for (ConfigMap configMap : allConfigMaps) {
@@ -267,7 +283,7 @@ public class JobService {
 
             jobBuilder.pipelineInstances(pipelineJobOverviewDtos);
 
-            appendRunnable(configMap.getData(), jobBuilder::runnable, accessibleToRun);
+            appendRunnable(projectId, configMap, jobBuilder::runnable, accessibleToRun);
 
             jobs.add(jobBuilder.build());
         }
@@ -278,17 +294,34 @@ public class JobService {
     }
 
     private void appendEditable(String projectId, Consumer<Boolean> consumer) {
-        consumer.accept(kubernetesService.isAccessible(projectId, "configmaps", "", Constants.UPDATE_ACTION));
+        consumer.accept(kubernetesService.isAccessible(projectId, "configmaps", "",
+                Constants.UPDATE_ACTION));
     }
 
-    private static void appendRunnable(Map<String, String> cmData, Consumer<Boolean> consumer, boolean accessibleToRun){
-        String jobConfigField = cmData.get(Constants.JOB_CONFIG_FIELD);
-        ObjectMapper objectMapper = new ObjectMapper();
+    private void appendRunnable(String projectId, ConfigMap cmData, Consumer<Boolean> consumer,
+                                boolean accessibleToRun) {
         try {
-            GraphDto graphDto = objectMapper.readValue(jobConfigField, GraphDto.class);
+            GraphDto graphDto = new ObjectMapper().readValue(extractJobDataFromCm(projectId, cmData), GraphDto.class);
             consumer.accept(accessibleToRun && !graphDto.getNodes().isEmpty());
         } catch (JsonProcessingException e) {
             throw new InternalProcessingException("Job config is corrupted", e);
+        } catch (ResourceNotFoundException e) {
+            throw new ResourceNotFoundException("Job config is missing", e);
+        }
+    }
+
+    private String extractJobDataFromCm(String projectId, ConfigMap cmData) {
+        try {
+            ConfigMap jobDataCm = kubernetesService.getConfigMap(projectId, cmData.getMetadata().getName() +
+                    Constants.JOB_CONFIG_SUFFIX);
+            return jobDataCm.getData().get(Constants.JOB_CONFIG_FIELD);
+        } catch (ResourceNotFoundException e) {
+            LOGGER.warn("Config map for '{}' Job Config is missing: {}. " +
+                            "Try to get JOB_CONFIG from the parent config map...",
+                    cmData.getMetadata().getName(),
+                    e.getLocalizedMessage()
+            );
+            return cmData.getData().get(Constants.JOB_CONFIG_FIELD);
         }
     }
 
@@ -324,7 +357,7 @@ public class JobService {
             if (!e.getStatus().getCode().equals(HttpStatus.NOT_FOUND.value())) {
                 throw e;
             }
-            LOGGER.warn("Unable to retrieve metrics for pod {}", jobId);
+            LOGGER.error("Unable to retrieve metrics for pod {}", jobId);
             return ResourceUsageDto.builder().build();
         }
     }
@@ -354,7 +387,7 @@ public class JobService {
             LOGGER.warn("Job {} has not started yet: {}", id, e.getLocalizedMessage());
         }
 
-        appendRunnable(configMap.getData(), jobResponseDtoBuilder::runnable, accessibleToRun);
+        appendRunnable(projectId, configMap, jobResponseDtoBuilder::runnable, accessibleToRun);
         appendEditable(projectId, jobResponseDtoBuilder::editable);
 
         return jobResponseDtoBuilder.build();
@@ -373,6 +406,8 @@ public class JobService {
         }
         projectService.checkConnectionDependencies(projectId, id,
                 DependencyHandlerService.getDefinition(configMap), null);
+
+        kubernetesService.deleteConfigMap(projectId, id + Constants.JOB_CONFIG_SUFFIX);
         kubernetesService.deleteConfigMap(projectId, id);
         kubernetesService.deletePodsByLabels(projectId, Map.of(Constants.JOB_ID_LABEL, id));
 
@@ -389,6 +424,22 @@ public class JobService {
      */
     public void run(final String projectId, final String jobId) {
         ConfigMap configMap = kubernetesService.getConfigMap(projectId, jobId);
+        try {
+            kubernetesService.getConfigMap(projectId, configMap.getMetadata().getName() +
+                    Constants.JOB_CONFIG_SUFFIX);
+        } catch (ResourceNotFoundException e) {
+            LOGGER.warn(
+                    "Config map for '{}' Job Config is missing: {}. Converting old-format configmap to new-format...",
+                    configMap.getMetadata().getName(),
+                    e.getLocalizedMessage());
+            JobResponseDto jobResponseDto = get(projectId, jobId);
+            JobRequestDto reCreatedJobDto = JobRequestDto.builder()
+                    .name(jobResponseDto.getName())
+                    .params(jobResponseDto.getParams())
+                    .definition(jobResponseDto.getDefinition())
+                    .build();
+            update(jobId, projectId, reCreatedJobDto);
+        }
         Pod pod = initializePod(projectId, jobId, configMap);
         try {
             kubernetesService.deletePod(projectId, jobId);
@@ -399,7 +450,7 @@ public class JobService {
                                                                    Constants.PIPELINE_JOB_ID_LABEL,
                                                                    Constants.NOT_PIPELINE_FLAG));
         } catch (ResourceNotFoundException e) {
-            LOGGER.info(KubernetesService.NO_POD_MESSAGE, e);
+            LOGGER.error(KubernetesService.NO_POD_MESSAGE, e);
         }
         podService.trackPodEvents(projectId, jobId);
         kubernetesService.createPod(projectId, pod);
@@ -513,12 +564,26 @@ public class JobService {
                 .withName("spark-pvc-volume")
                 .withMountPath(pvcMountPath)
                 .endVolumeMount()
+                .addNewVolumeMount()
+                .withName("job-config-data")
+                .withMountPath(jobConfigMountPath)
+                .endVolumeMount()
                 .endContainer()
                 .addNewVolume()
                 .withName("spark-pvc-volume")
                 .withNewPersistentVolumeClaim()
                 .withClaimName(K8sUtils.PVC_NAME)
                 .endPersistentVolumeClaim()
+                .endVolume()
+                .addNewVolume()
+                .withName("job-config-data")
+                .withNewConfigMap()
+                .withName(jobId + Constants.JOB_CONFIG_SUFFIX)
+                .withItems(new KeyToPathBuilder()
+                        .withKey(Constants.JOB_CONFIG_FIELD)
+                        .withPath(Constants.JOB_CONFIG_FILE)
+                        .build())
+                .endConfigMap()
                 .endVolume()
                 .addNewImagePullSecret(imagePullSecret)
                 .withRestartPolicy("Never")

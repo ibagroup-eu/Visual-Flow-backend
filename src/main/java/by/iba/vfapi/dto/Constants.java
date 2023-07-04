@@ -36,9 +36,14 @@ public final class Constants {
     public static final String CONNECTION_KEY_PATTERN = "[A-Za-z0-9\\-_]{1,50}";
     public static final String CONNECTION_NAME = "connectionName";
     public static final String JOB_CONFIG_FIELD = "JOB_CONFIG";
+    public static final String JOB_CONFIG_PATH_FIELD = "JOB_CONFIG_PATH";
+    public static final String JOB_CONFIG_FILE = "job-cfg.json";
     public static final String NAME = "name";
     public static final String TYPE = "type";
+    public static final String PARENT = "parent";
     public static final String TYPE_JOB = "job";
+    public static final String TYPE_JOB_CONFIG = "job-config";
+    public static final String JOB_CONFIG_SUFFIX = "-cfg";
     public static final String TYPE_PIPELINE = "pipeline";
     public static final String DEFINITION = "definition";
     public static final String LAST_MODIFIED = "lastModified";

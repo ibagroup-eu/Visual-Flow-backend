@@ -23,12 +23,13 @@ import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.services.K8sUtils;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
+import lombok.experimental.UtilityClass;
+
 import java.util.HashMap;
 import java.util.Map;
 
+@UtilityClass
 public class LoadFilePodBuilder {
-
-    private LoadFilePodBuilder() {}
 
     /**
      * Initialize Pod for mounting to PVC.
@@ -47,6 +48,11 @@ public class LoadFilePodBuilder {
                 .withNamespace(id)
                 .endMetadata()
                 .withNewSpec()
+                .withNewSecurityContext()
+                .withRunAsGroup(K8sUtils.GROUP_ID)
+                .withRunAsUser(K8sUtils.USER_ID)
+                .withFsGroup(K8sUtils.FS_GROUP_ID)
+                .endSecurityContext()
                 .addNewContainer()
                 .withName(K8sUtils.PVC_POD_NAME)
                 .withResources(K8sUtils.getResourceRequirements(params))

@@ -63,10 +63,13 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
+import static by.iba.vfapi.dto.Constants.JOB_CONFIG_FIELD;
 
 /**
  * TransferService class.
@@ -78,6 +81,10 @@ import java.util.stream.Collectors;
 // should not be coupled to too many other classes (Single Responsibility Principle).
 public class TransferService {
     private static final Pattern SHARPS_REGEX = Pattern.compile("^#(.+?)#$");
+    public static final String JOB_DATA_MIS_ERR = "Job Data is missing.";
+    public static final String JOB_METADATA_MIS_ERR = "Job Metadata is missing";
+    public static final String JOB_LABEL_MIS_ERR = "Job's Labels are missing";
+    public static final String JOB_NAME_MIS_ERR = "Job's Name is missing.";
     private final ArgoKubernetesService argoKubernetesService;
     private final JobService jobService;
     private final PipelineService pipelineService;
@@ -109,6 +116,7 @@ public class TransferService {
         Set<ConfigMap> exportedJobs = Sets.newHashSetWithExpectedSize(jobIds.size());
         for (String jobId : jobIds) {
             ConfigMap configMap = argoKubernetesService.getConfigMap(projectId, jobId);
+            configMap.getData().putIfAbsent(JOB_CONFIG_FIELD, jobService.extractJobDataFromCm(projectId, configMap));
             ObjectMeta metadata = configMap.getMetadata();
             ConfigMap configMapForExport = new ConfigMapBuilder()
                     .withMetadata(new ObjectMetaBuilder()
@@ -177,8 +185,8 @@ public class TransferService {
      * Appends missing project args to DTO.
      *
      * @param missingProjectArgs container for missing args
-     * @param kind                 flag whether it is job or pipeline
-     * @param graph                graph of job or pipeline
+     * @param kind               flag whether it is job or pipeline
+     * @param graph              graph of job or pipeline
      * @param existingArgs       existing project args
      */
     private static void appendMissingArgs(
@@ -220,7 +228,7 @@ public class TransferService {
     /**
      * Appends missing project args from job to DTO.
      *
-     * @param configMap            job's configmap
+     * @param configMap          job's configmap
      * @param missingProjectArgs container for missing args
      * @param existingArgs       existing project args
      */
@@ -264,23 +272,35 @@ public class TransferService {
 
         List<String> notImported = new LinkedList<>();
         for (ConfigMap configMap : jsonJobs) {
-            String id = configMap.getMetadata().getName();
-            String name = configMap.getMetadata().getLabels().get(Constants.NAME);
-            configMap
-                    .getMetadata()
-                    .getAnnotations()
-                    .put(Constants.LAST_MODIFIED, ZonedDateTime.now().format(Constants.DATE_TIME_FORMATTER));
+            AtomicReference<String> id = new AtomicReference<>(UUID.randomUUID().toString());
             try {
-                jobService.checkJobName(projectId, id, name);
+                Optional<ObjectMeta> metadataOpt = Optional.ofNullable(configMap.getMetadata());
+                Optional<String> idOpt = Optional.ofNullable(metadataOpt.orElseThrow(
+                        () -> new BadRequestException(JOB_METADATA_MIS_ERR)).getName());
+                idOpt.ifPresent(id::set);
+                Optional<Map<String, String>> labelsOpt = Optional.ofNullable(metadataOpt.get().getLabels());
+                Optional<String> nameOpt = Optional.ofNullable(labelsOpt.orElseThrow(
+                        () -> new BadRequestException(JOB_LABEL_MIS_ERR)).get(Constants.NAME));
+                String name = nameOpt.orElseThrow(() -> new BadRequestException(JOB_NAME_MIS_ERR));
+                configMap
+                        .getMetadata()
+                        .getAnnotations()
+                        .put(Constants.LAST_MODIFIED, ZonedDateTime.now().format(Constants.DATE_TIME_FORMATTER));
+                jobService.checkJobName(projectId, id.get(), name);
                 appendJobsMissingArgs(configMap, missingProjectParams, existingParams);
                 appendJobsMissingArgs(configMap, missingProjectConnections, existingConnections);
 
+                Optional<Map<String, String>> jobDataOpt = Optional.ofNullable(configMap.getData());
+                Optional<String> jobDataValueOpt = Optional.ofNullable(jobDataOpt.orElseThrow(() ->
+                        new BadRequestException(JOB_DATA_MIS_ERR)).get(JOB_CONFIG_FIELD));
+
                 Map<String, String> jobData = new HashMap<>();
-                jobData.put(Constants.JOB_CONFIG_FIELD, configMap.getData().get(Constants.JOB_CONFIG_FIELD));
+                jobData.put(JOB_CONFIG_FIELD, jobDataValueOpt.orElseThrow(() ->
+                        new BadRequestException(JOB_DATA_MIS_ERR)));
                 ConfigMap jobDataCm = new ConfigMapBuilder()
                         .addToData(jobData)
                         .withNewMetadata()
-                        .withName(id + Constants.JOB_CONFIG_SUFFIX)
+                        .withName(id.get() + Constants.JOB_CONFIG_SUFFIX)
                         .addToLabels(Constants.PARENT, name)
                         .addToLabels(Constants.TYPE, Constants.TYPE_JOB_CONFIG)
                         .addToAnnotations(Constants.LAST_MODIFIED,
@@ -288,14 +308,14 @@ public class TransferService {
                         .endMetadata()
                         .build();
 
-                configMap.getData().remove(Constants.JOB_CONFIG_FIELD);
+                configMap.getData().remove(JOB_CONFIG_FIELD);
                 configMap.getData().putIfAbsent(Constants.JOB_CONFIG_PATH_FIELD, jobConfigFullPath);
 
                 argoKubernetesService.createOrReplaceConfigMap(projectId, configMap);
-                jobService.createFromConfigMap(projectId, jobDataCm, false);
-            } catch (BadRequestException ex) {
+                argoKubernetesService.createOrReplaceConfigMap(projectId, jobDataCm);
+            } catch (BadRequestException | IllegalArgumentException ex) {
                 LOGGER.error(ex.getMessage(), ex);
-                notImported.add(id);
+                notImported.add(id.get());
             }
         }
 
@@ -305,7 +325,7 @@ public class TransferService {
     /**
      * Appends missing project args from pipeline to DTO.
      *
-     * @param workflowTemplate     workflow template
+     * @param workflowTemplate   workflow template
      * @param missingProjectArgs container for missing args
      * @param existingArgs       existing project args
      */
@@ -382,7 +402,7 @@ public class TransferService {
                                     params));
                 } else {
                     LOGGER.info("Pipeline with id {} will be updated via import operation", id);
-                    pipelineService.update(projectId, id, parsedDefinition, params,name);
+                    pipelineService.update(projectId, id, parsedDefinition, params, name);
                 }
                 appendPipelinesMissingArgs(workflowTemplate, missingProjectParams, existingParams);
                 appendPipelinesMissingArgs(workflowTemplate, missingProjectConnections, existingConnections);
@@ -492,10 +512,10 @@ public class TransferService {
                                         "Try to find JOB_CONFIG param in the parent configmap.",
                                 jobId,
                                 e.getLocalizedMessage());
-                        jobData.put(Constants.JOB_CONFIG_FIELD, confMap.getData().get(Constants.JOB_CONFIG_FIELD));
+                        jobData.put(JOB_CONFIG_FIELD, confMap.getData().get(JOB_CONFIG_FIELD));
                     }
 
-                    confMap.getData().remove(Constants.JOB_CONFIG_FIELD);
+                    confMap.getData().remove(JOB_CONFIG_FIELD);
                     confMap.getData().putIfAbsent(Constants.JOB_CONFIG_PATH_FIELD, jobConfigFullPath);
                     String newJobId = jobService.createFromConfigMap(projId, confMap, false);
 

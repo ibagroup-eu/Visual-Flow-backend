@@ -39,6 +39,7 @@
         <bouncycastle.version>1.68</bouncycastle.version>
         <log4j2.version>2.17.1</log4j2.version>
         <logback.version>1.2.9</logback.version>
+        <spring-security.version>5.7.10</spring-security.version>
     </properties>
 
     <dependencies>

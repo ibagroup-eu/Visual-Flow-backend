@@ -26,6 +26,10 @@ import io.fabric8.kubernetes.api.model.PodStatus;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+import org.apache.commons.lang3.RandomStringUtils;
+
 import java.math.BigDecimal;
 import java.time.ZonedDateTime;
 import java.util.Comparator;
@@ -35,21 +39,18 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.regex.Pattern;
-import lombok.AccessLevel;
-import lombok.NoArgsConstructor;
-import org.apache.commons.lang3.RandomStringUtils;
 
 /**
  * Util class for Kubernetes service.
  */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class K8sUtils {
-    static final Pattern NON_WORD_PATTERN = Pattern.compile("[^A-Za-z0-9]+");
-    static final String APP = "app";
-    static final String JOB_CONTAINER = "main";
-    static final String APPLICATION_ROLE = "vf-role";
-    static final Pattern LOG_PATTERN =
-        Pattern.compile("^(\\d{4}-\\d{2}-\\d{2}\\s\\d{2}:\\d{2}:\\d{2},\\d{3})\\s(?:\\[.+?\\s){2}(\\w+)\\s+(.+)$");
+    public static final Pattern NON_WORD_PATTERN = Pattern.compile("[^A-Za-z0-9]+");
+    public static final String APP = "app";
+    public static final String JOB_CONTAINER = "main";
+    public static final String APPLICATION_ROLE = "vf-role";
+    public static final Pattern LOG_PATTERN =
+            Pattern.compile("^(\\d{4}-\\d{2}-\\d{2}\\s\\d{2}:\\d{2}:\\d{2},\\d{3})\\s(?:\\[.+?\\s){2}(\\w+)\\s+(.+)$");
     public static final String DRAFT_STATUS = "Draft";
     public static final String SUSPENDED_STATUS = "Suspended";
     public static final String TERMINATED_STATUS = "Terminated";
@@ -66,24 +67,25 @@ public class K8sUtils {
     public static final String PVC_NAME = "vf-pvc";
     public static final String PVC_VOLUME_NAME = "vf-pvc-volume";
 
-    static final String WORKFLOW_TEMPLATE_TYPE = "workflowtemplates.argoproj.io";
-    static final String WORKFLOW_TYPE = "workflows.argoproj.io";
-    static final String CRON_WORKFLOW_TYPE = "cronworkflows.argoproj.io";
-    static final long USER_ID = 1000L;
-    static final long GROUP_ID = 1000L;
+    public static final String WORKFLOW_TEMPLATE_TYPE = "workflowtemplates.argoproj.io";
+    public static final String WORKFLOW_TYPE = "workflows.argoproj.io";
+    public static final String CRON_WORKFLOW_TYPE = "cronworkflows.argoproj.io";
+    public static final long USER_ID = 1000L;
+    public static final long GROUP_ID = 1000L;
+    public static final long FS_GROUP_ID = 1000L;
 
-    static final String CONFIGMAP = "configMap";
+    public static final String CONFIGMAP = "configMap";
 
     public static String extractTerminatedStateField(
-        PodStatus podStatus, Function<ContainerStateTerminated, String> method) {
+            PodStatus podStatus, Function<ContainerStateTerminated, String> method) {
         return podStatus
-            .getContainerStatuses()
-            .stream()
-            .map((ContainerStatus cs) -> cs.getState().getTerminated())
-            .filter(Objects::nonNull)
-            .map(method)
-            .max(Comparator.comparing(ZonedDateTime::parse, ZonedDateTime::compareTo))
-            .orElse(null);
+                .getContainerStatuses()
+                .stream()
+                .map((ContainerStatus cs) -> cs.getState().getTerminated())
+                .filter(Objects::nonNull)
+                .map(method)
+                .max(Comparator.comparing(ZonedDateTime::parse, ZonedDateTime::compareTo))
+                .orElse(null);
     }
 
     /**
@@ -103,16 +105,16 @@ public class K8sUtils {
      */
     public static ResourceRequirements getResourceRequirements(Map<String, String> params) {
         Quantity limitMem = Quantity.parse(Quantity
-                                               .getAmountInBytes(Quantity.parse(params.get(Constants.DRIVER_MEMORY)))
-                                               .multiply(BigDecimal.valueOf(Constants.MEMORY_OVERHEAD_FACTOR))
-                                               .toBigInteger()
-                                               .toString());
+                .getAmountInBytes(Quantity.parse(params.get(Constants.DRIVER_MEMORY)))
+                .multiply(BigDecimal.valueOf(Constants.MEMORY_OVERHEAD_FACTOR))
+                .toBigInteger()
+                .toString());
         return new ResourceRequirementsBuilder()
-            .addToLimits(Constants.CPU_FIELD, Quantity.parse(params.get(Constants.DRIVER_CORES)))
-            .addToLimits(Constants.MEMORY_FIELD, limitMem)
-            .addToRequests(Constants.CPU_FIELD, Quantity.parse(params.get(Constants.DRIVER_REQUEST_CORES)))
-            .addToRequests(Constants.MEMORY_FIELD, Quantity.parse(params.get(Constants.DRIVER_MEMORY)))
-            .build();
+                .addToLimits(Constants.CPU_FIELD, Quantity.parse(params.get(Constants.DRIVER_CORES)))
+                .addToLimits(Constants.MEMORY_FIELD, limitMem)
+                .addToRequests(Constants.CPU_FIELD, Quantity.parse(params.get(Constants.DRIVER_REQUEST_CORES)))
+                .addToRequests(Constants.MEMORY_FIELD, Quantity.parse(params.get(Constants.DRIVER_MEMORY)))
+                .build();
     }
 
     /**
@@ -120,7 +122,7 @@ public class K8sUtils {
      *
      * @return UUID in string format
      */
-     public static String getKubeCompatibleUUID() {
+    public static String getKubeCompatibleUUID() {
         return RandomStringUtils.randomAlphabetic(1) + UUID.randomUUID().toString().substring(1);
-     }
+    }
 }

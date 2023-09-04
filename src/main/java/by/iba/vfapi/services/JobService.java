@@ -310,7 +310,7 @@ public class JobService {
         }
     }
 
-    private String extractJobDataFromCm(String projectId, ConfigMap cmData) {
+    public String extractJobDataFromCm(String projectId, ConfigMap cmData) {
         try {
             ConfigMap jobDataCm = kubernetesService.getConfigMap(projectId, cmData.getMetadata().getName() +
                     Constants.JOB_CONFIG_SUFFIX);
@@ -522,6 +522,7 @@ public class JobService {
                 .withNewSecurityContext()
                 .withRunAsGroup(K8sUtils.GROUP_ID)
                 .withRunAsUser(K8sUtils.USER_ID)
+                .withFsGroup(K8sUtils.FS_GROUP_ID)
                 .endSecurityContext()
                 .addNewContainer()
                 .withName(K8sUtils.JOB_CONTAINER)

@@ -25,7 +25,7 @@ import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.model.argo.NodeStatus;
 import by.iba.vfapi.model.argo.Workflow;
 import by.iba.vfapi.model.argo.WorkflowStatus;
-import by.iba.vfapi.services.K8sUtils;
+import by.iba.vfapi.services.utils.K8sUtils;
 import by.iba.vfapi.services.KubernetesService;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.client.WatcherException;

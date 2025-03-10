@@ -31,7 +31,7 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public class LogRepositoryImpl implements LogRepository, InitializingBean {
-    private RedisTemplate<String, String> redisTemplate;
+    private final RedisTemplate<String, String> redisTemplate;
     protected ValueOperations<String, String> valueOperations;
 
     /**

@@ -27,17 +27,11 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 class AuthenticationServiceTest {
     private static final UserInfo USER_INFO = new UserInfo();
@@ -62,7 +56,7 @@ class AuthenticationServiceTest {
         SecurityContextHolder.setContext(securityContextMock);
         when(securityContextMock.getAuthentication().getPrincipal()).thenReturn(USER_INFO);
 
-        UserInfo fromContext = service.getUserInfo();
+        UserInfo fromContext = service.getUserInfo().get();
         assertEquals(USER_INFO, fromContext, "UserInfo must be equals to expected");
 
         verify(securityContextMock, times(2)).getAuthentication();
@@ -71,14 +65,14 @@ class AuthenticationServiceTest {
 
     @ParameterizedTest
     @CsvSource({"true", "false"})
-    void testGetUserInfoAuthenticationException(boolean isNull) {
+    void testGetUserInfoAuthenticationEmpty(boolean isNull) {
         Object returnValue = isNull ? null : "some str object";
         Authentication authentication = mock(Authentication.class);
         when(securityContextMock.getAuthentication()).thenReturn(authentication);
         SecurityContextHolder.setContext(securityContextMock);
         when(securityContextMock.getAuthentication().getPrincipal()).thenReturn(returnValue);
 
-        assertThrows(AuthenticationException.class, () -> service.getUserInfo(), "Expected exception must be thrown");
+        assertTrue(service.getUserInfo().isEmpty(), "Expected empty");
     }
 
     @Test

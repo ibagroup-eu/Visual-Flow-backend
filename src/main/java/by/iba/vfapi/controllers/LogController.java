@@ -58,7 +58,7 @@ public class LogController {
     public List<LogDto> getLogs(@PathVariable String projectId, @PathVariable String id) {
         LOGGER.info(
                 "{} - Receiving job '{}' logs in project '{}'",
-                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                authenticationService.getFormattedUserInfo(),
                 id,
                 projectId);
         return logService.getParsedPodLogs(projectId, id);
@@ -78,7 +78,7 @@ public class LogController {
             @PathVariable String projectId, @PathVariable String pipelineId, @PathVariable String nodeId) {
         LOGGER.info(
                 "{} - Receiving custom container in project '{}', pipeline '{}' at node '{}'",
-                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                authenticationService.getFormattedUserInfo(),
                 projectId,
                 pipelineId,
                 nodeId);
@@ -101,7 +101,7 @@ public class LogController {
             @PathVariable String logId) {
         LOGGER.info(
                 "{} - Receiving job/pipeline logs with id '{}' in project '{}'",
-                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                authenticationService.getFormattedUserInfo(),
                 id,
                 projectId
         );

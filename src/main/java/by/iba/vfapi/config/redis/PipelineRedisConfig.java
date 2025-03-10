@@ -19,7 +19,8 @@
 
 package by.iba.vfapi.config.redis;
 
-import org.springframework.beans.factory.annotation.Value;
+import by.iba.vfapi.config.ApplicationConfigurationProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.jedis.JedisConnectionFactory;
@@ -29,18 +30,21 @@ import org.springframework.data.redis.core.RedisTemplate;
  * Configuration class for PipelineRedisConfig.
  */
 @Configuration
-public class PipelineRedisConfig extends RedisConfig {
-    @Value("${redis.pipelineHistoryDatabase}")
-    private Integer database = null;
+public class PipelineRedisConfig extends RedisConfig<Object> {
+
+    @Autowired
+    public PipelineRedisConfig(ApplicationConfigurationProperties appProperties) {
+        super(appProperties, Object.class);
+    }
 
     /**
      * Configure redis connection factory for pipeline's history.
      *
-     * @return
+     * @return JedisConnectionFactory
      */
     @Bean
     public JedisConnectionFactory pipelineRedisConnectionFactory() {
-        return jedisConnectionFactory(database);
+        return jedisConnectionFactory(appProperties.getRedis().getPipelineHistoryDatabase());
     }
 
     /**
@@ -49,12 +53,7 @@ public class PipelineRedisConfig extends RedisConfig {
      * @return instance of RedisTemplate
      */
     @Bean(name = "pipelineRedisTemplate")
-    public RedisTemplate pipelineRedisTemplate() {
-        RedisTemplate<String, Object> redisTemplate = new RedisTemplate<>();
-        redisTemplate.setConnectionFactory(pipelineRedisConnectionFactory());
-        setSerializer(redisTemplate);
-        redisTemplate.afterPropertiesSet();
-
-        return redisTemplate;
+    public RedisTemplate<String, Object> pipelineRedisTemplate() {
+        return createRedisTemplate(pipelineRedisConnectionFactory());
     }
 }

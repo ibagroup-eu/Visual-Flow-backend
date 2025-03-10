@@ -19,6 +19,7 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.config.ApplicationConfigurationProperties;
 import by.iba.vfapi.config.MailSenderConfig;
 import by.iba.vfapi.dao.PipelineHistoryRepository;
 import by.iba.vfapi.dto.Constants;
@@ -28,9 +29,8 @@ import by.iba.vfapi.dto.history.PipelineNodesHistoryResponseDto;
 import by.iba.vfapi.dto.pipelines.CronPipelineDto;
 import by.iba.vfapi.dto.pipelines.PipelineOverviewDto;
 import by.iba.vfapi.dto.pipelines.PipelineOverviewListDto;
-import by.iba.vfapi.dto.pipelines.PipelineResponseDto;
+import by.iba.vfapi.dto.pipelines.PipelineDto;
 import by.iba.vfapi.dto.projects.ParamDto;
-import by.iba.vfapi.dto.projects.ParamsDto;
 import by.iba.vfapi.exceptions.ArgoClientException;
 import by.iba.vfapi.exceptions.BadRequestException;
 import by.iba.vfapi.exceptions.InternalProcessingException;
@@ -50,6 +50,7 @@ import by.iba.vfapi.model.argo.Inputs;
 import by.iba.vfapi.model.argo.KeyToPath;
 import by.iba.vfapi.model.argo.NodeStatus;
 import by.iba.vfapi.model.argo.Parameter;
+import by.iba.vfapi.model.argo.PersistentVolumeClaim;
 import by.iba.vfapi.model.argo.PipelineParams;
 import by.iba.vfapi.model.argo.Resource;
 import by.iba.vfapi.model.argo.RuntimeData;
@@ -60,17 +61,21 @@ import by.iba.vfapi.model.argo.TemplateMeta;
 import by.iba.vfapi.model.argo.ValueFrom;
 import by.iba.vfapi.model.argo.VolumeMounts;
 import by.iba.vfapi.model.argo.Volumes;
-import by.iba.vfapi.model.argo.PersistentVolumeClaim;
 import by.iba.vfapi.model.argo.Workflow;
 import by.iba.vfapi.model.argo.WorkflowSpec;
 import by.iba.vfapi.model.argo.WorkflowStatus;
 import by.iba.vfapi.model.argo.WorkflowTemplate;
 import by.iba.vfapi.model.argo.WorkflowTemplateRef;
 import by.iba.vfapi.model.argo.WorkflowTemplateSpec;
+import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.model.history.AbstractHistory;
 import by.iba.vfapi.model.history.PipelineHistory;
 import by.iba.vfapi.model.history.PipelineNodeHistory;
 import by.iba.vfapi.services.auth.AuthenticationService;
+import by.iba.vfapi.services.utils.GraphUtils;
+import by.iba.vfapi.services.utils.K8sUtils;
+import by.iba.vfapi.services.utils.ParamUtils;
+import by.iba.vfapi.services.utils.PipelineUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -81,18 +86,32 @@ import io.argoproj.workflow.models.WorkflowRetryRequest;
 import io.argoproj.workflow.models.WorkflowStopRequest;
 import io.argoproj.workflow.models.WorkflowSuspendRequest;
 import io.argoproj.workflow.models.WorkflowTerminateRequest;
-import io.fabric8.kubernetes.api.model.*;
+import io.fabric8.kubernetes.api.model.ObjectMeta;
+import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
+import io.fabric8.kubernetes.api.model.Quantity;
+import io.fabric8.kubernetes.api.model.ResourceQuota;
+import io.fabric8.kubernetes.api.model.ResourceRequirements;
+import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
+import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.client.ResourceNotFoundException;
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.codec.binary.Base64;
+import org.apache.commons.text.StringEscapeUtils;
+import org.springframework.stereotype.Service;
 
+import javax.validation.Valid;
+import javax.validation.constraints.NotNull;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -102,31 +121,11 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
-import javax.validation.Valid;
-import javax.validation.constraints.NotNull;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
-import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.codec.binary.Base64;
-import org.apache.commons.text.StringEscapeUtils;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-
-import static by.iba.vfapi.dto.Constants.CONTAINER_NODE_ID;
-import static by.iba.vfapi.dto.Constants.NODE_JOB_ID;
-import static by.iba.vfapi.dto.Constants.NODE_PIPELINE_ID;
-import static by.iba.vfapi.dto.Constants.NODE_OPERATION;
-import static by.iba.vfapi.dto.Constants.NODE_OPERATION_CONTAINER;
-import static by.iba.vfapi.dto.Constants.NODE_OPERATION_JOB;
-import static by.iba.vfapi.dto.Constants.NODE_OPERATION_PIPELINE;
-import static by.iba.vfapi.dto.Constants.NODE_OPERATION_NOTIFICATION;
-import static by.iba.vfapi.dto.Constants.NODE_OPERATION_WAIT;
-import static by.iba.vfapi.dto.Constants.PIPELINE_ID_LABEL;
-import static by.iba.vfapi.dto.Constants.NODE_NAME;
-import static by.iba.vfapi.dto.Constants.PIPELINE_HISTORY;
-import static by.iba.vfapi.dto.Constants.PIPELINE_NODE_HISTORY;
+import static by.iba.vfapi.dto.Constants.*;
+import static by.iba.vfapi.services.utils.K8sUtils.PENDING_STATUS;
 
 /**
  * PipelineService class.
@@ -134,6 +133,7 @@ import static by.iba.vfapi.dto.Constants.PIPELINE_NODE_HISTORY;
 @Slf4j
 @Service
 @Getter
+@RequiredArgsConstructor
 public class PipelineService {
     public static final String LIMITS_CPU = "limitsCpu";
     public static final String REQUESTS_CPU = "requestsCpu";
@@ -159,60 +159,16 @@ public class PipelineService {
     private static final String INPUT_PARAMETER_PATTERN_IS_TRUE = " {{inputs.parameters.%s}} == true";
     private static final String INPUTS_PARAMETERS_NAME = "{{inputs.parameters.name}}";
     private static final String INPUTS_PARAMETERS_OPERATION = "{{inputs.parameters.operation}}";
-    private final String host;
-    private final String slackToken;
     private final MailSenderConfig mailSenderConfig;
-    private final String sparkImage;
     private final ArgoKubernetesService argoKubernetesService;
     private final ProjectService projectService;
     private final WorkflowServiceApi apiInstance;
-    private final String jobMaster;
-    private final String serviceAccount;
-    private final String imagePullSecret;
-    private final String notificationImage;
-    private final String pvcMountPath;
-    private final String jobConfigMountPath;
     private final WorkflowService workflowService;
     private final AuthenticationService authenticationService;
     private final DependencyHandlerService dependencyHandlerService;
     private final PipelineHistoryRepository<? extends AbstractHistory> pipelineHistoryRepository;
-
-    public PipelineService(
-            @Value("${job.spark.image}") String sparkImage,
-            @Value("${job.spark.master}") final String jobMaster,
-            @Value("${job.spark.serviceAccount}") final String serviceAccount,
-            @Value("${job.imagePullSecret}") final String imagePullSecret,
-            @Value("${pvc.mountPath}") final String pvcMountPath,
-            @Value("${job.config.mountPath}") final String jobConfigMountPath,
-            @Value("${server.host}") final String host,
-            @Value("${notifications.image}") final String notificationImage,
-            @Value("${notifications.slack.token}") final String slackToken,
-            MailSenderConfig mailSenderConfig,
-            ArgoKubernetesService argoKubernetesService,
-            ProjectService projService,
-            WorkflowServiceApi apiInstance,
-            final WorkflowService workflowService,
-            final AuthenticationService authenticationService,
-            final DependencyHandlerService dependencyHandlerService,
-            final PipelineHistoryRepository<? extends AbstractHistory> pipelineHistoryRepository) {
-        this.host = host;
-        this.notificationImage = notificationImage;
-        this.slackToken = slackToken;
-        this.mailSenderConfig = mailSenderConfig;
-        this.sparkImage = sparkImage;
-        this.jobMaster = jobMaster;
-        this.serviceAccount = serviceAccount;
-        this.imagePullSecret = imagePullSecret;
-        this.argoKubernetesService = argoKubernetesService;
-        this.projectService = projService;
-        this.apiInstance = apiInstance;
-        this.pvcMountPath = pvcMountPath;
-        this.jobConfigMountPath = jobConfigMountPath;
-        this.workflowService = workflowService;
-        this.authenticationService = authenticationService;
-        this.dependencyHandlerService = dependencyHandlerService;
-        this.pipelineHistoryRepository = pipelineHistoryRepository;
-    }
+    private final ApplicationConfigurationProperties appProperties;
+    private final ValidatorService validatorService;
 
     /**
      * Creating DAGTask for spark job.
@@ -649,20 +605,20 @@ public class PipelineService {
                                         mentionedUsers,
                                         Constants.PIPELINE_NAME_LABEL)))
                         .env(List.of(
-                                new Env().name("VF_HOST").value(host),
-                                new Env().name("SLACK_TOKEN").value(slackToken),
+                                new Env().name("VF_HOST").value(appProperties.getNotifications().getUiHost()),
+                                new Env().name("SLACK_TOKEN").value(appProperties.getNotifications().getSlack().getToken()),
                                 new Env().name("EMAIL_ADDRESS").value(mailSenderConfig.getUsername()),
                                 new Env().name("EMAIL_PASS").value(mailSenderConfig.getPassword()),
                                 new Env().name("SMTP_HOST").value(mailSenderConfig.getHost()),
                                 new Env().name("SMTP_PORT").value(String.valueOf(mailSenderConfig.getPort())),
                                 new Env().name("SMTP_STARTTLS").value(mailSenderConfig
                                         .getJavaMailProperties()
-                                        .getProperty("mail.smtp.starttls.enable")),
+                                        .get("mail.smtp.starttls.enable").toString()),
                                 new Env().name("SMTP_AUTH").value(mailSenderConfig
                                         .getJavaMailProperties()
-                                        .getProperty("mail.smtp.auth"))))
-                        .envFrom(List.of(new EnvFrom().secretRef(new SecretRef().name(ParamsDto.SECRET_NAME))))
-                        .image(notificationImage)
+                                        .get("mail.smtp.auth").toString())))
+                        .envFrom(List.of(new EnvFrom().secretRef(new SecretRef().name(ParamUtils.SECRET_NAME))))
+                        .image(appProperties.getNotifications().getImage())
                         .imagePullPolicy(ALWAYS_PULL_POLICY)
                         .name(null)
                         .resources(new ResourceRequirementsBuilder()
@@ -700,9 +656,8 @@ public class PipelineService {
      * @param dto             dto
      * @param accessibleToRun is user have permission for run
      */
-    private static void appendRunnable(
-            Collection<DagTask> dagTasks, PipelineOverviewDto dto, boolean accessibleToRun) {
-        dto.runnable(accessibleToRun && !dagTasks.isEmpty());
+    private static void appendRunnable(Collection<DagTask> dagTasks, PipelineOverviewDto dto, boolean accessibleToRun) {
+        dto.setRunnable(accessibleToRun && !dagTasks.isEmpty());
     }
 
     /**
@@ -850,15 +805,15 @@ public class PipelineService {
                         REQUESTS_MEMORY))
                 .container(new Container()
                         .name(K8sUtils.JOB_CONTAINER)
-                        .image(sparkImage)
+                        .image(appProperties.getJob().getSpark().getImage())
                         .command(List.of("/opt/spark/work-dir/entrypoint.sh"))
                         .imagePullPolicy(ALWAYS_PULL_POLICY)
                         .volumeMounts(List.of(new VolumeMounts()
                                         .name(K8sUtils.PVC_VOLUME_NAME)
-                                        .mountPath(pvcMountPath),
+                                        .mountPath(appProperties.getPvc().getMountPath()),
                                 new VolumeMounts()
                                         .name("job-config-data")
-                                        .mountPath(jobConfigMountPath))
+                                        .mountPath(appProperties.getJob().getConfig().getMountPath()))
                         )
                         .env(List.of(new Env()
                                         .name("POD_IP")
@@ -876,16 +831,15 @@ public class PipelineService {
                                                 .fieldPath("metadata.name")
                                                 .apiVersion("v1"))),
                                 new Env().name("JOB_ID").value("{{inputs.parameters.configMap}}"),
-                                new Env().name("JOB_MASTER").value(jobMaster),
-                                new Env().name("JOB_IMAGE").value(sparkImage),
-                                new Env().name("IMAGE_PULL_SECRETS").value(imagePullSecret),
-                                new Env().name("POD_NAMESPACE").value(namespace),
+                                new Env().name("JOB_MASTER").value(appProperties.getJob().getSpark().getMaster()),
+                                new Env().name("JOB_IMAGE").value(appProperties.getJob().getSpark().getImage()),
+                                new Env().name("IMAGE_PULL_SECRETS").value(appProperties.getJob().getImagePullSecret()),
                                 new Env().name("PVC_NAME").value(K8sUtils.PVC_NAME),
-                                new Env().name("MOUNT_PATH").value(pvcMountPath)))
+                                new Env().name("MOUNT_PATH").value(appProperties.getPvc().getMountPath())))
                         .envFrom(List.of(new EnvFrom().configMapRef(new ConfigMapRef().name(
-                                        "{{inputs.parameters" +
-                                                ".configMap}}")),
-                                new EnvFrom().secretRef(new SecretRef().name(ParamsDto.SECRET_NAME)))))
+                                "{{inputs.parameters.configMap}}")),
+                                new EnvFrom().secretRef(new SecretRef().name(ParamUtils.SECRET_NAME)),
+                                new EnvFrom().secretRef(new SecretRef().name(SYSTEM_SECRET)))))
                 .metadata(new TemplateMeta().labels(Map.of(Constants.JOB_ID_LABEL,
                         "{{inputs.parameters.configMap}}",
                         PIPELINE_ID_LABEL,
@@ -939,7 +893,7 @@ public class PipelineService {
             container.command(List.of("/bin/sh", "-c", "--", String.format(INPUT_PARAMETER_PATTERN, COMMAND)));
         }
         if (mountProjectParams) {
-            container.envFrom(List.of(new EnvFrom().secretRef(new SecretRef().name(ParamsDto.SECRET_NAME))));
+            container.envFrom(List.of(new EnvFrom().secretRef(new SecretRef().name(ParamUtils.SECRET_NAME))));
         }
         return new Template()
                 .name(composeContainerTemplateName(withCustomCommand, mountProjectParams))
@@ -986,15 +940,15 @@ public class PipelineService {
                         NODE_OPERATION,
                         INPUTS_PARAMETERS_OPERATION)))
                 .container(new Container()
-                        .image(notificationImage)
+                        .image(appProperties.getNotifications().getImage())
                         .command(List.of("/bin/bash", "-c", "--"))
                         .args(List.of(String.format(
                                 "python3 /app/slack_job.py -m {{inputs.parameters.%s}} -a {{inputs.parameters.%s}}",
                                 Constants.NODE_NOTIFICATION_MESSAGE,
                                 Constants.NODE_NOTIFICATION_RECIPIENTS)))
                         .imagePullPolicy(ALWAYS_PULL_POLICY)
-                        .env(List.of(new Env().name("SLACK_API_TOKEN").value(slackToken)))
-                        .envFrom(List.of(new EnvFrom().secretRef(new SecretRef().name(ParamsDto.SECRET_NAME))))
+                        .env(List.of(new Env().name("SLACK_API_TOKEN").value(appProperties.getNotifications().getSlack().getToken())))
+                        .envFrom(List.of(new EnvFrom().secretRef(new SecretRef().name(ParamUtils.SECRET_NAME))))
                         .resources(new ResourceRequirementsBuilder()
                                 .addToLimits(Map.of(Constants.CPU_FIELD,
                                         Quantity.parse("500m"),
@@ -1033,9 +987,9 @@ public class PipelineService {
                                         "\"workflowTemplateRef\": {\"name\":\"{{inputs.parameters.%s}}\"}}}",
                                 PIPELINE_ID,
                                 PIPELINE_ID,
-                                argoKubernetesService.getSecondsAfterCompletion(),
-                                argoKubernetesService.getSecondsAfterSuccess(),
-                                argoKubernetesService.getSecondsAfterFailure(),
+                                appProperties.getArgo().getTtlStrategy().getSecondsAfterCompletion(),
+                                appProperties.getArgo().getTtlStrategy().getSecondsAfterSuccess(),
+                                appProperties.getArgo().getTtlStrategy().getSecondsAfterFailure(),
                                 PIPELINE_ID))
                         .successCondition("status.phase == Succeeded")
                         .failureCondition("status.phase in (Failed, Error)")
@@ -1071,7 +1025,7 @@ public class PipelineService {
                             ContainerStageConfig.fromContainerNode(node, projectParams, namespace, argoKubernetesService);
                     if (ContainerStageConfig.ImagePullSecretType.NEW == config.getImagePullSecretType()) {
                         String secretName =
-                                KubernetesService.getUniqueEntityName((String secName) -> argoKubernetesService.getSecret(
+                                K8sUtils.getUniqueEntityName((String secName) -> argoKubernetesService.getSecret(
                                         namespace,
                                         secName));
                         config.prepareNewSecret(secretName, workflowTemplate.getMetadata().getName());
@@ -1080,7 +1034,7 @@ public class PipelineService {
                     return config;
                 }));
         Set<ImagePullSecret> pullSecrets = new HashSet<>();
-        pullSecrets.add(new ImagePullSecret().name(imagePullSecret));
+        pullSecrets.add(new ImagePullSecret().name(appProperties.getJob().getImagePullSecret()));
         containerStageConfig
                 .entrySet()
                 .stream()
@@ -1103,7 +1057,7 @@ public class PipelineService {
         templates.add(createTemplateWithDag(graphDto, containerStageConfig, workflowTemplate));
 
         workflowTemplate.setSpec(new WorkflowTemplateSpec()
-                .serviceAccountName(serviceAccount)
+                .serviceAccountName(appProperties.getJob().getSpark().getServiceAccount())
                 .entrypoint(Constants.DAG_TEMPLATE_NAME)
                 .onExit(Constants.EXIT_HANDLER)
                 .imagePullSecrets(pullSecrets)
@@ -1163,13 +1117,17 @@ public class PipelineService {
                 .name(Constants.EXIT_HANDLER)
                 .inputs(new Inputs()
                         .addParametersItem(new Parameter().name(Constants.EMAIL_NOTIFY_SUCCESS)
-                                .value(Boolean.TRUE.equals(params.getEmail().getSuccessNotify()) ? Boolean.TRUE.toString() : Boolean.FALSE.toString()))
+                                .value(Boolean.TRUE.equals(params.getEmail().getSuccessNotify())
+                                        ? Boolean.TRUE.toString() : Boolean.FALSE.toString()))
                         .addParametersItem(new Parameter().name(Constants.EMAIL_NOTIFY_FAILURE)
-                                .value(Boolean.TRUE.equals(params.getEmail().getFailureNotify()) ? Boolean.TRUE.toString() : Boolean.FALSE.toString()))
+                                .value(Boolean.TRUE.equals(params.getEmail().getFailureNotify())
+                                        ? Boolean.TRUE.toString() : Boolean.FALSE.toString()))
                         .addParametersItem(new Parameter().name(Constants.SLACK_NOTIFY_SUCCESS)
-                                .value(Boolean.TRUE.equals(params.getSlack().getSuccessNotify()) ? Boolean.TRUE.toString() : Boolean.FALSE.toString()))
+                                .value(Boolean.TRUE.equals(params.getSlack().getSuccessNotify())
+                                        ? Boolean.TRUE.toString() : Boolean.FALSE.toString()))
                         .addParametersItem(new Parameter().name(Constants.SLACK_NOTIFY_FAILURE)
-                                .value(Boolean.TRUE.equals(params.getSlack().getFailureNotify()) ? Boolean.TRUE.toString() : Boolean.FALSE.toString()))
+                                .value(Boolean.TRUE.equals(params.getSlack().getFailureNotify())
+                                        ? Boolean.TRUE.toString() : Boolean.FALSE.toString()))
                 )
                 .steps(List.of(List.of(
                         new Step().name(Constants.EMAIL_NOTIFY_SUCCESS)
@@ -1217,7 +1175,7 @@ public class PipelineService {
      */
     private static Set<String> getPipelineIdsByDefinition(JsonNode jsonNode) {
         try {
-            return GraphDto.parseGraph(Objects.requireNonNullElse(jsonNode,
+            return GraphUtils.parseGraph(Objects.requireNonNullElse(jsonNode,
                             new ObjectMapper().readTree("{\"graph\":[]}")))
                     .getNodes()
                     .stream()
@@ -1285,10 +1243,10 @@ public class PipelineService {
      * @param definition definition for pipeline
      * @return WorkflowTemplate
      */
-    WorkflowTemplate createWorkflowTemplate(
-            String projectId, String id, String name, JsonNode definition, PipelineParams params) {
-        GraphDto graphDto = GraphDto.parseGraph(definition);
-        GraphDto.validateGraphPipeline(graphDto, projectId, id, argoKubernetesService);
+    WorkflowTemplate createWorkflowTemplate(String projectId, String id, String name, JsonNode definition,
+                                            PipelineParams params) {
+        GraphDto graphDto = GraphUtils.parseGraph(definition);
+        validatorService.validateGraphPipeline(graphDto, projectId, id);
 
         WorkflowTemplate workflowTemplate = new WorkflowTemplate();
         setMeta(workflowTemplate, id, name, definition);
@@ -1318,6 +1276,16 @@ public class PipelineService {
     }
 
     /**
+     * Method to check, if pipeline exists.
+     * @param projectId is project ID;
+     * @param name is workflow name (pipeline ID);
+     * @return true, if this pipeline exists.
+     */
+    public boolean checkIfPipelineExists(String projectId, String name) {
+        return argoKubernetesService.isWorkflowTemplateExist(projectId, name);
+    }
+
+    /**
      * Create or replace workflow template.
      *
      * @param projectId  project id
@@ -1329,7 +1297,7 @@ public class PipelineService {
                          JsonNode definition, PipelineParams params) {
         checkPipelineName(projectId, null, name);
         String id =
-                KubernetesService.getUniqueEntityName(
+                K8sUtils.getUniqueEntityName(
                         (String wfId) -> argoKubernetesService.getWorkflowTemplate(
                                 projectId,
                                 wfId));
@@ -1338,7 +1306,7 @@ public class PipelineService {
         argoKubernetesService.createOrReplaceWorkflowTemplate(projectId, workflowTemplate);
         dependencyHandlerService.addDependencies(projectId, id,
                 dependencyHandlerService.getNodesByDefinition(
-                        DependencyHandlerService.getDefinition(workflowTemplate)));
+                        DependencyHandlerService.getPipelineDefinition(workflowTemplate)));
         List<String> foundParams = ProjectService.findParamsKeysInString(definition.toString());
         if (!foundParams.isEmpty()) {
             List<ParamDto> existingParams = projectService.getParams(projectId).getParams();
@@ -1358,39 +1326,40 @@ public class PipelineService {
      * @param id        workflow id
      * @return json graph
      */
-    public PipelineResponseDto getById(String projectId, String id) {
+    public PipelineDto getById(String projectId, String id) {
         WorkflowTemplate workflowTemplate = argoKubernetesService.getWorkflowTemplate(projectId, id);
         ObjectMeta metadata = workflowTemplate.getMetadata();
         Map<String, String> annotations = metadata.getAnnotations();
         PipelineParams params = workflowTemplate.getSpec().getPipelineParams();
         boolean editable = isArgoResourceEditable(projectId, "workflowtemplates", Constants.UPDATE_ACTION);
-        PipelineResponseDto pipelineResponseDto = ((PipelineResponseDto) new PipelineResponseDto()
+        PipelineDto pipelineDto = PipelineDto.builder()
                 .id(id)
                 .name(metadata.getLabels().get(Constants.NAME))
                 .lastModified(annotations.get(Constants.LAST_MODIFIED))
-                .status(K8sUtils.DRAFT_STATUS))
+                .status(K8sUtils.DRAFT_STATUS)
                 .editable(editable)
-                .params(params);
+                .params(params)
+                .build();
         if (argoKubernetesService.isCronWorkflowReadyOrExist(projectId, id)) {
-            pipelineResponseDto.cron(true);
-            pipelineResponseDto.cronSuspend(argoKubernetesService.getCronWorkflow(projectId, id)
+            pipelineDto.setCron(true);
+            pipelineDto.setCronSuspend(argoKubernetesService.getCronWorkflow(projectId, id)
                     .getSpec()
                     .isSuspend());
         } else {
             LOGGER.info("There is no cron: {}", id);
         }
         try {
-            pipelineResponseDto.definition(MAPPER.readTree(Base64.decodeBase64(annotations.get(Constants.DEFINITION))));
+            pipelineDto.setDefinition(MAPPER.readTree(Base64.decodeBase64(annotations.get(Constants.DEFINITION))));
         } catch (IOException e) {
             throw new InternalProcessingException("Unable to parse definition JSON", e);
         }
-        appendRuntimeInfo(projectId, id, pipelineResponseDto, workflowTemplate);
+        appendRuntimeInfo(projectId, id, pipelineDto, workflowTemplate);
         boolean accessibleToRun = isArgoResourceEditable(projectId, "workflows", Constants.CREATE_ACTION);
         appendRunnable(getDagTaskFromWorkflowTemplateSpec(workflowTemplate.getSpec()),
-                pipelineResponseDto,
+                pipelineDto,
                 accessibleToRun);
 
-        return pipelineResponseDto;
+        return pipelineDto;
     }
 
     /**
@@ -1479,12 +1448,11 @@ public class PipelineService {
             String projectId, String id, PipelineOverviewDto dto, WorkflowTemplate workflowTemplate) {
         try {
             RuntimeData runtimeData = getRunTimeData(projectId, id, workflowTemplate.getSpec().getTemplates());
-            dto
-                    .startedAt(runtimeData.getStartedAt())
-                    .finishedAt(runtimeData.getFinishedAt())
-                    .status(runtimeData.getStatus())
-                    .progress(runtimeData.getProgress())
-                    .jobsStatuses(runtimeData.getJobsStatuses());
+            dto.setStartedAt(runtimeData.getStartedAt());
+            dto.setFinishedAt(runtimeData.getFinishedAt());
+            dto.setStatus(runtimeData.getStatus());
+            dto.setProgress(runtimeData.getProgress());
+            dto.setJobsStatuses(runtimeData.getJobsStatuses());
         } catch (ResourceNotFoundException e) {
             LOGGER.warn("Pipeline {} has not started yet", id);
         }
@@ -1504,16 +1472,17 @@ public class PipelineService {
         for (WorkflowTemplate workflowTemplate : allWorkflowTemplates) {
             ObjectMeta metadata = workflowTemplate.getMetadata();
             String id = metadata.getName();
-            PipelineOverviewDto pipelineOverviewDto = new PipelineOverviewDto()
+            PipelineOverviewDto pipelineOverviewDto = PipelineOverviewDto.builder()
                     .id(id)
                     .name(metadata.getLabels().get(Constants.NAME))
                     .tags(checkIfTagsExistsInTemplate(workflowTemplate.getSpec().getPipelineParams()))
                     .dependentPipelineIds(checkIfDependsExistsInTemplate(workflowTemplate.getSpec().getPipelineParams()))
                     .status(K8sUtils.DRAFT_STATUS)
-                    .lastModified(metadata.getAnnotations().get(Constants.LAST_MODIFIED));
+                    .lastModified(metadata.getAnnotations().get(Constants.LAST_MODIFIED))
+                    .build();
             if (argoKubernetesService.isCronWorkflowReadyOrExist(projectId, id)) {
-                pipelineOverviewDto.cron(true);
-                pipelineOverviewDto.cronSuspend(argoKubernetesService.getCronWorkflow(projectId, id)
+                pipelineOverviewDto.setCron(true);
+                pipelineOverviewDto.setCronSuspend(argoKubernetesService.getCronWorkflow(projectId, id)
                         .getSpec()
                         .isSuspend());
             } else {
@@ -1541,13 +1510,12 @@ public class PipelineService {
     /**
      * Updating pipeline.
      *
-     * @param id         pipeline id
      * @param projectId  project id
-     * @param definition new definition
+     * @param id         pipeline id
      * @param name       name
+     * @param definition new definition
      */
-    public void update(final String projectId, final String id, final JsonNode definition,
-                       final PipelineParams params, final String name) {
+    public void update(String projectId, String id, String name, PipelineParams params, JsonNode definition) {
         checkPipelineName(projectId, id, name);
         try {
             dependencyHandlerService.updateDependenciesGraphPipeline(projectId, id, definition);
@@ -1558,7 +1526,7 @@ public class PipelineService {
         try {
             argoKubernetesService.deleteWorkflow(projectId, id);
         } catch (ResourceNotFoundException e) {
-            LOGGER.info("No workflows to remove");
+            LOGGER.info("No workflows to delete");
         }
         argoKubernetesService.deleteSecretsByLabels(projectId,
                 new HashMap<>(Map.of(Constants.PIPELINE_ID_LABEL, id, Constants.CONTAINER_STAGE, "true")));
@@ -1589,7 +1557,7 @@ public class PipelineService {
         if (dependencyHandlerService.pipelineHasDepends(workflowTemplate)) {
             dependencyHandlerService.deleteDependencies(projectId, pipelineId,
                     dependencyHandlerService.getNodesByDefinition(
-                            DependencyHandlerService.getDefinition(workflowTemplate)));
+                            DependencyHandlerService.getPipelineDefinition(workflowTemplate)));
             argoKubernetesService.deleteWorkflowTemplate(projectId, pipelineId);
             argoKubernetesService.deleteWorkflow(projectId, pipelineId);
             argoKubernetesService.deleteSecretsByLabels(projectId,
@@ -1617,7 +1585,7 @@ public class PipelineService {
         allParams.forEach(param -> param.getValue().getJobUsages().clear());
         List<PipelineOverviewDto> allPips = getAll(projectId).getPipelines();
         for (PipelineOverviewDto pipOverviewDto : allPips) {
-            PipelineResponseDto pipDto = getById(projectId, pipOverviewDto.getId());
+            PipelineDto pipDto = getById(projectId, pipOverviewDto.getId());
             List<String> foundParams = ProjectService.findParamsKeysInString(pipDto.getDefinition().toString());
             if (!foundParams.isEmpty()) {
                 allParams
@@ -1640,13 +1608,14 @@ public class PipelineService {
         WorkflowTemplate workflowTemplate = argoKubernetesService.getWorkflowTemplate(projectId, id);
         ResourceQuota quota = argoKubernetesService.getResourceQuota(projectId, Constants.QUOTA_NAME);
         validateResourceAvailability(quota, workflowTemplate);
-        argoKubernetesService.createOrReplaceWorkflowTemplate(projectId, workflowTemplate);
+        projectService.createOrUpdateSystemSecret(projectId);
         argoKubernetesService.deleteWorkflow(projectId, id);
         Workflow workflow = new Workflow();
         workflow.setMetadata(new ObjectMetaBuilder()
                 .withName(id)
                 .addToLabels(Constants.TYPE, Constants.TYPE_PIPELINE)
-                .addToLabels(Constants.STARTED_BY, authenticationService.getUserInfo().getUsername())
+                .addToLabels(Constants.STARTED_BY,
+                        authenticationService.getUserInfo().map(UserInfo::getUsername).orElseThrow())
                 .addToLabels(Constants.PIPELINE_NAME_LABEL, workflowTemplate.getMetadata().getLabels().get("name"))
                 .build()
         );
@@ -1665,7 +1634,7 @@ public class PipelineService {
         performArgoAction(projectId,
                 id,
                 ((RuntimeData data) -> List
-                        .of(K8sUtils.PENDING_STATUS, K8sUtils.RUNNING_STATUS)
+                        .of(PENDING_STATUS, K8sUtils.RUNNING_STATUS)
                         .contains(data.getStatus())),
                 "You cannot suspend pipeline that hasn't been run",
                 (String pId, String i) -> apiInstance.workflowServiceSuspendWorkflow(pId,
@@ -1700,6 +1669,7 @@ public class PipelineService {
         CronWorkflow cronWorkflow = new CronWorkflow();
         cronWorkflow.setMetadata(new ObjectMetaBuilder().withName(id).build());
         cronWorkflow.setSpec(CronWorkflowSpec.fromDtoAndWFTMPLName(cronPipelineDto, id));
+        workflowService.trackWorkflowEvents(projectId, id);
         argoKubernetesService.createOrReplaceCronWorkflow(projectId, cronWorkflow);
     }
 
@@ -1722,7 +1692,7 @@ public class PipelineService {
      */
     public CronPipelineDto getCronById(String projectId, String id) {
         CronWorkflow cronWorkflow = argoKubernetesService.getCronWorkflow(projectId, id);
-        return CronPipelineDto.fromSpec(cronWorkflow.getSpec());
+        return PipelineUtils.convertSpecToWorkflow(cronWorkflow.getSpec());
     }
 
     /**
@@ -1831,7 +1801,7 @@ public class PipelineService {
         performArgoAction(projectId,
                 id,
                 ((RuntimeData data) -> List
-                        .of(K8sUtils.RUNNING_STATUS, K8sUtils.SUSPENDED_STATUS, K8sUtils.PENDING_STATUS)
+                        .of(K8sUtils.RUNNING_STATUS, K8sUtils.SUSPENDED_STATUS, PENDING_STATUS)
                         .contains(data.getStatus())),
                 "You cannot terminate pipeline that hasn't been started or suspended",
                 (String pId, String i) -> apiInstance.workflowServiceTerminateWorkflow(pId,
@@ -1849,7 +1819,7 @@ public class PipelineService {
         performArgoAction(projectId,
                 id,
                 ((RuntimeData data) -> List
-                        .of(K8sUtils.RUNNING_STATUS, K8sUtils.SUSPENDED_STATUS, K8sUtils.PENDING_STATUS)
+                        .of(K8sUtils.RUNNING_STATUS, K8sUtils.SUSPENDED_STATUS, PENDING_STATUS)
                         .contains(data.getStatus())),
                 "You cannot stop pipeline that hasn't been started " + "or suspended",
                 (String pId, String i) -> apiInstance.workflowServiceStopWorkflow(pId,
@@ -1870,9 +1840,10 @@ public class PipelineService {
                         .of(K8sUtils.FAILED_STATUS, K8sUtils.ERROR_STATUS)
                         .contains(data.getStatus())),
                 "You cannot retry pipeline that hasn't failed",
-                (String pId, String i) -> apiInstance.workflowServiceRetryWorkflow(pId,
-                        i,
-                        new WorkflowRetryRequest()));
+                (String pId, String i) -> {
+                    apiInstance.workflowServiceRetryWorkflow(pId, i, new WorkflowRetryRequest());
+                    workflowService.trackWorkflowEvents(projectId, id);
+                });
     }
 
     /**
@@ -1911,13 +1882,13 @@ public class PipelineService {
     private void validateResourceAvailability(
             ResourceQuota quota, WorkflowTemplate workflowTemplate) {
         BigDecimal executorLimitsCpu =
-                Quantity.getAmountInBytes(Quantity.parse(argoKubernetesService.getArgoExecutorLimitsCpu()));
+                Quantity.getAmountInBytes(appProperties.getArgo().getLimits().getCpu());
         BigDecimal executorLimitsMemory =
-                Quantity.getAmountInBytes(Quantity.parse(argoKubernetesService.getArgoExecutorLimitsMemory()));
+                Quantity.getAmountInBytes(appProperties.getArgo().getLimits().getMemory());
         BigDecimal executorRequestsCpu =
-                Quantity.getAmountInBytes(Quantity.parse(argoKubernetesService.getArgoExecutorRequestsCpu()));
+                Quantity.getAmountInBytes(appProperties.getArgo().getRequests().getCpu());
         BigDecimal executorRequestsMemory =
-                Quantity.getAmountInBytes(Quantity.parse(argoKubernetesService.getArgoExecutorRequestsMemory()));
+                Quantity.getAmountInBytes(appProperties.getArgo().getRequests().getMemory());
         BigDecimal limitsCpu = Quantity
                 .getAmountInBytes(quota.getStatus().getHard().get(Constants.LIMITS_CPU))
                 .subtract(executorLimitsCpu);
@@ -2058,6 +2029,48 @@ public class PipelineService {
             return Arrays.asList(dependencies.split(Pattern.quote(" && ")));
         }
         return Collections.emptyList();
+    }
+
+    /**
+     * Copies pipeline.
+     *
+     * @param projectId  project id
+     * @param pipelineId pipeline id
+     */
+    public void copy(final String projectId, final String pipelineId) {
+        WorkflowTemplate workflowTemplate = argoKubernetesService.getWorkflowTemplate(projectId, pipelineId);
+        String newPipelineId =
+                K8sUtils.getUniqueEntityName((String newId) -> argoKubernetesService.getWorkflowTemplate(
+                        projectId,
+                        newId));
+        K8sUtils.copyEntity(projectId, workflowTemplate, (String projId, WorkflowTemplate wfTemplate) -> {
+
+            Set<Secret> imagePullSecrets = new HashSet<>(argoKubernetesService.getSecretsByLabels(projectId,
+                    new HashMap<>(Map.of(
+                            PIPELINE_ID_LABEL,
+                            pipelineId,
+                            CONTAINER_STAGE,
+                            "true"))));
+
+            imagePullSecrets.forEach((Secret s) -> {
+                s.getMetadata().getLabels().replace(PIPELINE_ID_LABEL, newPipelineId);
+                String newSecretName =
+                        K8sUtils.getUniqueEntityName((String sName) -> argoKubernetesService.getSecret(
+                                projectId,
+                                sName));
+                s.getMetadata().setName(newSecretName);
+                argoKubernetesService.createOrReplaceSecret(projectId, s);
+            });
+            ArrayList<ImagePullSecret> listOfSecrets = new ArrayList<>();
+            listOfSecrets.add(new ImagePullSecret().name(appProperties.getJob().getImagePullSecret()));
+            imagePullSecrets.forEach((Secret sec) -> listOfSecrets.add(new ImagePullSecret().name(sec
+                    .getMetadata()
+                    .getName())));
+            wfTemplate.getSpec().setImagePullSecrets(listOfSecrets);
+            wfTemplate.getSpec().getPipelineParams().setDependentPipelineIds(Set.of());
+            wfTemplate.getMetadata().setName(newPipelineId);
+            argoKubernetesService.createOrReplaceWorkflowTemplate(projectId, wfTemplate);
+        }, argoKubernetesService.getAllWorkflowTemplates(projectId));
     }
 
     /**

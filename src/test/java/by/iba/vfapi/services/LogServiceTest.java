@@ -19,15 +19,15 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.common.LoadFilePodBuilderService;
+import by.iba.vfapi.config.ApplicationConfigurationProperties;
 import by.iba.vfapi.dao.LogRepositoryImpl;
 import by.iba.vfapi.dto.LogDto;
-import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.services.auth.AuthenticationService;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.PodListBuilder;
-import io.fabric8.kubernetes.client.ResourceNotFoundException;
 import io.fabric8.kubernetes.client.server.mock.KubernetesServer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,32 +36,29 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.net.HttpURLConnection;
-import java.util.*;
+import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class LogServiceTest {
-    private KubernetesService kubernetesService;
     @Mock
     private LogRepositoryImpl logRepository;
     @Mock
     private AuthenticationService authenticationServiceMock;
     private final KubernetesServer server = new KubernetesServer();
-
-    private static final String APP_NAME = "vf";
-    private static final String APP_NAME_LABEL = "testApp";
-    private static final String PVC_MOUNT_PATH = "/files";
-    private static final String IMAGE_PULL_SECRET = "vf-dev-image-pull";
-
     private LogService logService;
+    @Mock
+    private ApplicationConfigurationProperties appProperties;
+    @Mock
+    private LoadFilePodBuilderService filePodService;
 
     @BeforeEach
     void setUp() {
         server.before();
-        kubernetesService = new KubernetesService(
-                server.getClient(), APP_NAME, APP_NAME_LABEL, PVC_MOUNT_PATH, IMAGE_PULL_SECRET, authenticationServiceMock);
+        KubernetesService kubernetesService = new KubernetesService(appProperties, server.getClient(), authenticationServiceMock, filePodService);
         this.logService = new LogService( logRepository, kubernetesService);
     }
 
@@ -163,12 +160,6 @@ class LogServiceTest {
 
         assertEquals(2, logsObjects.size(), "Size must be equals to 2");
         assertEquals(expected, logsObjects.get(0), "Logs must be equal to expected");
-    }
-
-    private void mockAuthenticationService() {
-        UserInfo ui = new UserInfo();
-        ui.setSuperuser(true);
-        when(authenticationServiceMock.getUserInfo()).thenReturn(ui);
     }
 
 }

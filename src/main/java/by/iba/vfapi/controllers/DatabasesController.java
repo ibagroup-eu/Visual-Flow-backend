@@ -19,14 +19,15 @@
 
 package by.iba.vfapi.controllers;
 
+import by.iba.vfapi.config.ApplicationConfigurationProperties;
 import by.iba.vfapi.dto.databases.PingStatusDto;
 import by.iba.vfapi.dto.projects.ConnectDto;
 import by.iba.vfapi.services.DatabasesService;
 import by.iba.vfapi.services.auth.AuthenticationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -45,6 +46,7 @@ import javax.validation.Valid;
  */
 @Slf4j
 @Tag(name = "Databases API", description = "Manage DB connections")
+@RequiredArgsConstructor
 @RestController
 @RequestMapping("api/db")
 public class DatabasesController {
@@ -52,24 +54,7 @@ public class DatabasesController {
     private final DatabasesService databaseService;
     private final AuthenticationService authenticationService;
     private final RestTemplate restTemplate;
-    private final String dbServiceHost;
-
-    /**
-     * Initialization constructor.
-     * @param databaseService is needed to get connections objects.
-     * @param authenticationService is needed to auth user before execution operations.
-     * @param restTemplate is needed to make HTTP requests.
-     * @param dbServiceHost is DB-service host, declared in yaml.
-     */
-    public DatabasesController(DatabasesService databaseService,
-                               AuthenticationService authenticationService,
-                               RestTemplate restTemplate,
-                               @Value("${db-service.host}") String dbServiceHost) {
-        this.databaseService = databaseService;
-        this.authenticationService = authenticationService;
-        this.restTemplate = restTemplate;
-        this.dbServiceHost = dbServiceHost;
-    }
+    private final ApplicationConfigurationProperties appProperties;
 
     /**
      * Method for getting connection ping status by project id and connection name.
@@ -83,14 +68,14 @@ public class DatabasesController {
     public ResponseEntity<PingStatusDto> ping(@PathVariable final String projectId, @PathVariable final String name) {
         LOGGER.info(
                 "{} - Receiving {} connection ping status for the '{}' project",
-                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                authenticationService.getFormattedUserInfo(),
                 name,
                 projectId);
         ConnectDto connection = databaseService.getConnection(projectId, name);
         if (connection == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,"The connection has not been found!");
         } else {
-            return restTemplate.postForEntity(dbServiceHost, connection, PingStatusDto.class);
+            return restTemplate.postForEntity(appProperties.getDbService().getHost(), connection, PingStatusDto.class);
         }
     }
 
@@ -107,10 +92,10 @@ public class DatabasesController {
                                               @RequestBody @Valid final ConnectDto connectionDto) {
         LOGGER.info(
                 "{} - Receiving {} connection ping status for the '{}' project",
-                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                authenticationService.getFormattedUserInfo(),
                 connectionDto.getKey(),
                 projectId);
-        return restTemplate.postForEntity(dbServiceHost,
+        return restTemplate.postForEntity(appProperties.getDbService().getHost(),
                 databaseService.replaceParams(projectId, connectionDto),
                 PingStatusDto.class);
     }

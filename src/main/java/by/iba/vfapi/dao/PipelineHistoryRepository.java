@@ -19,6 +19,8 @@
 
 package by.iba.vfapi.dao;
 
+import by.iba.vfapi.config.redis.PipelineRedisConfig;
+import by.iba.vfapi.config.redis.RedisConfig;
 import by.iba.vfapi.model.history.AbstractHistory;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,11 +32,9 @@ import org.springframework.stereotype.Repository;
  * PipelineHistoryRepository class.
  */
 @Repository
-public class PipelineHistoryRepository<T extends AbstractHistory>
-        extends HistoryRepositoryImpl
-        implements InitializingBean
-{
-    private RedisTemplate<String, Object> redisTemplate;
+public class PipelineHistoryRepository<T extends AbstractHistory> extends HistoryRepositoryImpl
+        implements InitializingBean {
+    private final RedisTemplate<String, Object> redisTemplate;
 
     /**
      * Constructor for class PipelineHistoryRepository.
@@ -42,8 +42,10 @@ public class PipelineHistoryRepository<T extends AbstractHistory>
      * @param redisTemplate redisTemplate
      */
     @Autowired
-    public PipelineHistoryRepository(@Qualifier("pipelineRedisTemplate") RedisTemplate<String, Object> redisTemplate) {
+    public PipelineHistoryRepository(@Qualifier("pipelineRedisTemplate") RedisTemplate<String, Object> redisTemplate,
+                                     PipelineRedisConfig redisConfig) {
         this.redisTemplate = redisTemplate;
+        this.redisConfig = redisConfig;
     }
 
     /**

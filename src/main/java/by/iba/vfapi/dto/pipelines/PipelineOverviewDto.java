@@ -20,28 +20,35 @@
 package by.iba.vfapi.dto.pipelines;
 
 import by.iba.vfapi.config.OpenApiConfig;
+import by.iba.vfapi.dto.Constants;
 import io.swagger.v3.oas.annotations.media.Schema;
-import java.util.Collection;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import lombok.experimental.SuperBuilder;
+
+import javax.validation.constraints.Pattern;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.ToString;
+import java.util.Set;
 
 /**
  * Pipeline response DTO class.
  */
-@EqualsAndHashCode
+@Data
+@SuperBuilder
+@AllArgsConstructor
 @NoArgsConstructor
-@Getter
-@ToString
 @Schema(description = "DTO with basic info about the pipeline")
 public class PipelineOverviewDto {
     @Schema(ref = OpenApiConfig.SCHEMA_UUID_TWO)
     private String id;
-    @Schema(description = "Pipeline's name", example = "test_pipe321")
+    @Pattern(regexp = Constants.NAME_PATTERN, message = "The name should only consist of alphanumerics or ' " +
+            "\\-_' characters and have a total length between 3 and 40 characters max")
+    @Schema(description = "Name of the pipeline", example = "test_pipe321")
     private String name;
     @Schema(ref = OpenApiConfig.SCHEMA_DATETIME_FIRST)
     private String lastModified;
@@ -62,130 +69,9 @@ public class PipelineOverviewDto {
     @Schema(description = "Pipeline's list of tags")
     private List<String> tags;
     @Schema(description = "Pipeline's list of dependencies")
-    private List<String> dependentPipelineIds;
+    private Set<String> dependentPipelineIds;
     @Schema(ref = OpenApiConfig.SCHEMA_PIPELINE_STAGE_STATUSES)
     private Map<String, String> jobsStatuses;
-
-    /**
-     * Setter for id.
-     *
-     * @param id id
-     * @return this
-     */
-    public PipelineOverviewDto id(String id) {
-        this.id = id;
-        return this;
-    }
-
-    /**
-     * Setter for name.
-     *
-     * @param name name
-     * @return this
-     */
-    public PipelineOverviewDto name(String name) {
-        this.name = name;
-        return this;
-    }
-
-    /**
-     * Setter for lastModified.
-     *
-     * @param lastModified lastModified
-     * @return this
-     */
-    public PipelineOverviewDto lastModified(String lastModified) {
-        this.lastModified = lastModified;
-        return this;
-    }
-
-    /**
-     * Setter for startedAt.
-     *
-     * @param startedAt startedAt
-     * @return this
-     */
-    public PipelineOverviewDto startedAt(String startedAt) {
-        this.startedAt = startedAt;
-        return this;
-    }
-
-    /**
-     * Setter for finishedAt.
-     *
-     * @param finishedAt finishedAt
-     * @return this
-     */
-    public PipelineOverviewDto finishedAt(String finishedAt) {
-        this.finishedAt = finishedAt;
-        return this;
-    }
-
-    /**
-     * Setter for status.
-     *
-     * @param status status
-     * @return this
-     */
-    public PipelineOverviewDto status(String status) {
-        this.status = status;
-        return this;
-    }
-
-    /**
-     * Setter for progress.
-     *
-     * @param progress progress
-     * @return this
-     */
-    public PipelineOverviewDto progress(double progress) {
-        this.progress = progress;
-        return this;
-    }
-
-    /**
-     * Setter for cron.
-     *
-     * @param cron cron
-     * @return this
-     */
-    public PipelineOverviewDto cron(boolean cron) {
-        this.cron = cron;
-        return this;
-    }
-
-    /**
-     * Setter for cronjob status.
-     *
-     * @param cronSuspend cronjob status
-     * @return this
-     */
-    public PipelineOverviewDto cronSuspend(boolean cronSuspend) {
-        this.cronSuspend = cronSuspend;
-        return this;
-    }
-
-    /**
-     * Setter for runnable.
-     *
-     * @param runnable runnable
-     * @return this
-     */
-    public PipelineOverviewDto runnable(boolean runnable) {
-        this.runnable = runnable;
-        return this;
-    }
-
-    /**
-     * Setter for jobsStatuses.
-     *
-     * @param jobsStatuses jobsStatuses
-     * @return this
-     */
-    public PipelineOverviewDto jobsStatuses(Map<String, String> jobsStatuses) {
-        this.jobsStatuses = jobsStatuses;
-        return this;
-    }
 
     /**
      * Setter for tags.
@@ -208,7 +94,7 @@ public class PipelineOverviewDto {
      */
     public PipelineOverviewDto dependentPipelineIds(Collection<String> dependentPipelineIds) {
         if (dependentPipelineIds != null) {
-            this.dependentPipelineIds = new ArrayList<>(dependentPipelineIds);
+            this.dependentPipelineIds = new HashSet<>(dependentPipelineIds);
         }
         return this;
     }

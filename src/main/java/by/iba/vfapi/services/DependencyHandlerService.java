@@ -24,10 +24,12 @@ import by.iba.vfapi.dto.GraphDto;
 import by.iba.vfapi.exceptions.BadRequestException;
 import by.iba.vfapi.model.argo.PipelineParams;
 import by.iba.vfapi.model.argo.WorkflowTemplate;
+import by.iba.vfapi.services.utils.GraphUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.HasMetadata;
+import io.fabric8.kubernetes.client.ResourceNotFoundException;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.binary.Base64;
@@ -39,12 +41,12 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
-import static by.iba.vfapi.dto.Constants.NODE_OPERATION;
-import static by.iba.vfapi.dto.Constants.NODE_OPERATION_JOB;
-import static by.iba.vfapi.dto.Constants.NODE_OPERATION_PIPELINE;
+import static by.iba.vfapi.dto.Constants.*;
 
 /**
  * DependencyHandlerService class.
@@ -69,7 +71,7 @@ public class DependencyHandlerService {
      */
     public void updateDependenciesGraphPipeline(String projectId, String id,
                                                 JsonNode newDefinition) {
-        JsonNode oldDefinition = getDefinition(argoKubernetesService.getWorkflowTemplate(projectId, id));
+        JsonNode oldDefinition = getPipelineDefinition(argoKubernetesService.getWorkflowTemplate(projectId, id));
         findDifferences(projectId, id, newDefinition, oldDefinition);
     }
 
@@ -103,7 +105,7 @@ public class DependencyHandlerService {
      * @param set2 the second set
      * @return result node dto set
      */
-    private Set<GraphDto.NodeDto> filterSet(Set<GraphDto.NodeDto> set1, Set<GraphDto.NodeDto> set2){
+    private static Set<GraphDto.NodeDto> filterSet(Set<GraphDto.NodeDto> set1, Set<GraphDto.NodeDto> set2) {
         return set1.stream()
                 .filter(node -> !(node.getValue().get(Constants.NODE_JOB_ID) != null &&
                         set2.stream()
@@ -121,9 +123,9 @@ public class DependencyHandlerService {
     /**
      * Assign dependencies by node set
      *
-     * @param projectId   definition for pipeline with updates
-     * @param pipelineId  pipeline's id
-     * @param nodes Set of nodes
+     * @param projectId  definition for pipeline with updates
+     * @param pipelineId pipeline's id
+     * @param nodes      Set of nodes
      */
     public void addDependencies(String projectId, String pipelineId, Iterable<GraphDto.NodeDto> nodes) {
         for (GraphDto.NodeDto node : nodes) {
@@ -140,9 +142,9 @@ public class DependencyHandlerService {
     /**
      * Removing dependencies by node set
      *
-     * @param projectId   definition for pipeline with updates
-     * @param pipelineId  pipeline's id
-     * @param nodes Set of nodes
+     * @param projectId  definition for pipeline with updates
+     * @param pipelineId pipeline's id
+     * @param nodes      Set of nodes
      */
     public void deleteDependencies(String projectId, String pipelineId, Iterable<GraphDto.NodeDto> nodes) {
         for (GraphDto.NodeDto node : nodes) {
@@ -184,47 +186,63 @@ public class DependencyHandlerService {
      * @param targetJobId
      */
     public void deleteJobDependency(String projectId, String pipelineId, String targetJobId) {
-        ConfigMap configMap = argoKubernetesService.getConfigMap(projectId, targetJobId);
-        Map<String, String> data = configMap.getData();
-        Set<String> existingIds = checkIfJobDependsExist(configMap.getData());
-        existingIds = existingIds.stream()
-                .filter(id -> !pipelineId.equals(id))
-                .collect(Collectors.toSet());
-        data.put(Constants.DEPENDENT_PIPELINE_IDS, String.join(",", existingIds));
-        configMap.setData(data);
-        argoKubernetesService.createOrReplaceConfigMap(projectId, configMap);
-        LOGGER.info(
-                "Pipeline dependency {} has been removed from the job {}",
-                pipelineId,
-                targetJobId);
+        try {
+            ConfigMap configMap = argoKubernetesService.getConfigMap(projectId, targetJobId);
+            Map<String, String> data = configMap.getData();
+            Set<String> existingIds = checkIfJobDependsExist(configMap.getData());
+            existingIds = existingIds.stream()
+                    .filter(id -> !pipelineId.equals(id))
+                    .collect(Collectors.toSet());
+            data.put(Constants.DEPENDENT_PIPELINE_IDS, String.join(",", existingIds));
+            configMap.setData(data);
+            argoKubernetesService.createOrReplaceConfigMap(projectId, configMap);
+            LOGGER.info(
+                    "Pipeline dependency {} has been removed from the job {}",
+                    pipelineId,
+                    targetJobId);
+        } catch (ResourceNotFoundException e) {
+            LOGGER.info("Pipeline dependency {} has NOT been removed from the job {}, " +
+                            "since this job doesn't exist. Skipping...",
+                    pipelineId,
+                    targetJobId);
+            LOGGER.debug("{}", e.getLocalizedMessage());
+        }
     }
 
     /**
      * Adding a Pipeline ID to another Pipeline's Workflow Template
      *
-     * @param projectId   definition for pipeline with updates
-     * @param pipelineId  old definition for pipeline
+     * @param projectId        definition for pipeline with updates
+     * @param pipelineId       old definition for pipeline
      * @param targetPipelineId
      */
     public void addPipelineDependency(String projectId, String pipelineId, String targetPipelineId) {
-        WorkflowTemplate workflowTemplate =
-                argoKubernetesService.getWorkflowTemplate(projectId, targetPipelineId);
-        PipelineParams pipelineParams = workflowTemplate.getSpec().getPipelineParams();
-        Set<String> pipelineIDs = checkIfPipelineDependsExist(pipelineParams);
-        pipelineIDs.add(pipelineId);
-        workflowTemplate.getSpec().getPipelineParams().setDependentPipelineIds(pipelineIDs);
-        argoKubernetesService.createOrReplaceWorkflowTemplate(projectId, workflowTemplate);
-        LOGGER.info(
-                "Pipeline dependency {} has been added to the pipeline {}",
-                pipelineId,
-                targetPipelineId);
+        try {
+            WorkflowTemplate workflowTemplate =
+                    argoKubernetesService.getWorkflowTemplate(projectId, targetPipelineId);
+            PipelineParams pipelineParams = workflowTemplate.getSpec().getPipelineParams();
+            Set<String> pipelineIDs = checkIfPipelineDependsExist(pipelineParams);
+            pipelineIDs.add(pipelineId);
+            workflowTemplate.getSpec().getPipelineParams().setDependentPipelineIds(pipelineIDs);
+            argoKubernetesService.createOrReplaceWorkflowTemplate(projectId, workflowTemplate);
+            LOGGER.info(
+                    "Pipeline dependency {} has been added to the pipeline {}",
+                    pipelineId,
+                    targetPipelineId);
+        } catch (ResourceNotFoundException e) {
+            LOGGER.info("Pipeline dependency {} has NOT been added to the pipeline {}," +
+                            "since this pipeline doesn't exist. Skipping...",
+                    pipelineId,
+                    targetPipelineId);
+            LOGGER.debug("{}", e.getLocalizedMessage());
+        }
     }
 
     /**
      * Removing a Pipeline ID from another Pipeline's Workflow Template
      *
-     * @param projectId   definition for pipeline with updates
-     * @param pipelineId  old definition for pipeline
+     * @param projectId        definition for pipeline with updates
+     * @param pipelineId       old definition for pipeline
      * @param targetPipelineId
      */
     public void deletedPipelineDependency(String projectId, String pipelineId, String targetPipelineId) {
@@ -251,7 +269,7 @@ public class DependencyHandlerService {
      */
     public Set<GraphDto.NodeDto> getNodesByDefinition(JsonNode jsonNode) {
         try {
-            return new HashSet<>(GraphDto.parseGraph(Objects.requireNonNullElse(jsonNode,
+            return new HashSet<>(GraphUtils.parseGraph(Objects.requireNonNullElse(jsonNode,
                             MAPPER.readTree("{\"graph\":[]}")))
                     .getNodes());
         } catch (IOException e) {
@@ -275,7 +293,7 @@ public class DependencyHandlerService {
     /**
      * Getting a dependency existence check to use by the another pipeline
      *
-     * @param workflowTemplate  workflowTemplate
+     * @param workflowTemplate workflowTemplate
      * @return boolean true/false
      */
     public boolean pipelineHasDepends(WorkflowTemplate workflowTemplate) {
@@ -286,15 +304,63 @@ public class DependencyHandlerService {
     }
 
     /**
-     * Retrieve definition from metadata
+     * Retrieve definition from job (encoded).
      *
-     * @param metadata metadata
+     * @param projectId project ID
+     * @param configMap job's configmap
+     * @param service   service, is used for getting configmaps
+     * @return job's definition in base64 encoding.
+     */
+    public static String getJobDefinitionString(String projectId, ConfigMap configMap, KubernetesService service) {
+        AtomicReference<String> definition = new AtomicReference<>();
+        Optional<String> defData = Optional.ofNullable(configMap
+                .getMetadata()
+                .getAnnotations()
+                .get(Constants.DEFINITION));
+        defData.ifPresent(definition::set);
+        if (Optional.ofNullable(definition.get()).isEmpty()) {
+            defData = Optional.ofNullable(configMap
+                    .getData()
+                    .get(Constants.DEFINITION));
+            defData.ifPresent(definition::set);
+            if (Optional.ofNullable(definition.get()).isEmpty()) {
+                ConfigMap jobDefCm = service.getConfigMap(projectId,
+                        configMap.getMetadata().getName() + Constants.JOB_DEF_SUFFIX);
+                defData = Optional.ofNullable(jobDefCm
+                        .getData()
+                        .get(Constants.DEFINITION));
+                defData.ifPresent(definition::set);
+            }
+        }
+        return definition.get();
+    }
+
+    /**
+     * Retrieve definition from job (decoded).
+     *
+     * @param projectId project ID
+     * @param configMap job's configmap
+     * @param service   service, is used for getting configmaps
+     * @return job's decoded definition from base64.
+     */
+    public static JsonNode getJobDefinition(String projectId, ConfigMap configMap, KubernetesService service) {
+        try {
+            return MAPPER.readTree(Base64.decodeBase64(getJobDefinitionString(projectId, configMap, service)));
+        } catch (IOException e) {
+            throw new JsonParseException(e);
+        }
+    }
+
+    /**
+     * Retrieve definition from pipeline
+     *
+     * @param configMap pipeline's configmap
      * @return JsonNode definition
      */
-    public static JsonNode getDefinition(HasMetadata metadata) {
+    public static JsonNode getPipelineDefinition(HasMetadata configMap) {
         try {
             return MAPPER
-                    .readTree(Base64.decodeBase64(metadata
+                    .readTree(Base64.decodeBase64(configMap
                             .getMetadata()
                             .getAnnotations()
                             .get(Constants.DEFINITION)));

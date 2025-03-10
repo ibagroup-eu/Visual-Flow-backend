@@ -19,6 +19,7 @@
 
 package by.iba.vfapi.config.redis;
 
+import by.iba.vfapi.config.ApplicationConfigurationProperties;
 import by.iba.vfapi.model.history.AbstractHistory;
 import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import com.fasterxml.jackson.annotation.PropertyAccessor;
@@ -26,13 +27,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 import com.fasterxml.jackson.databind.jsontype.PolymorphicTypeValidator;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Configuration;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.RedisPassword;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.jedis.JedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import java.util.ArrayList;
@@ -40,14 +42,21 @@ import java.util.ArrayList;
 /**
  * Configuration class for Redis.
  */
-@Configuration
-public class RedisConfig {
-    @Value("${redis.host}")
-    private String host = null;
-    @Value("${redis.port}")
-    private Integer port = null;
-    @Value("${redis.password}")
-    private String password = null;
+@RequiredArgsConstructor
+public class RedisConfig<T> {
+
+    protected final ApplicationConfigurationProperties appProperties;
+
+    private final Class<T> type;
+
+    /**
+     * Getter-method for recordLogs property.
+     *
+     * @return recordLogs property.
+     */
+    public boolean isRecordLogs() {
+        return appProperties.getRedis().isRecordLogs();
+    }
 
     /**
      * Connector to database.
@@ -56,9 +65,11 @@ public class RedisConfig {
      * @return redis connection
      */
     JedisConnectionFactory jedisConnectionFactory(int database) {
-        RedisStandaloneConfiguration redisStandaloneConfiguration = new RedisStandaloneConfiguration(host, port);
+        RedisStandaloneConfiguration redisStandaloneConfiguration = new RedisStandaloneConfiguration(
+                appProperties.getRedis().getHost(), appProperties.getRedis().getPort()
+        );
         redisStandaloneConfiguration.setDatabase(database);
-        redisStandaloneConfiguration.setPassword(RedisPassword.of(password));
+        redisStandaloneConfiguration.setPassword(RedisPassword.of(appProperties.getRedis().getPassword()));
 
         return new JedisConnectionFactory(redisStandaloneConfiguration);
     }
@@ -68,27 +79,43 @@ public class RedisConfig {
      *
      * @param redisTemplate redis template
      */
-    public void setSerializer(RedisTemplate redisTemplate) {
+    protected void setSerializer(RedisTemplate<String, T> redisTemplate) {
         StringRedisSerializer stringRedisSerializer = new StringRedisSerializer();
-        Jackson2JsonRedisSerializer jackson2JsonRedisSerializer = new Jackson2JsonRedisSerializer(Object.class);
+        Jackson2JsonRedisSerializer<T> jackson2JsonRedisSerializer = new Jackson2JsonRedisSerializer<>(type);
 
         PolymorphicTypeValidator ptv = BasicPolymorphicTypeValidator
-            .builder()
-            .allowIfSubType(String.class)
-            .allowIfSubType(AbstractHistory.class)
-            .allowIfSubType(ArrayList.class)
-            .build();
+                .builder()
+                .allowIfSubType(String.class)
+                .allowIfSubType(AbstractHistory.class)
+                .allowIfSubType(ArrayList.class)
+                .build();
         ObjectMapper om = JsonMapper
-            .builder()
-            .activateDefaultTyping(ptv, ObjectMapper.DefaultTyping.NON_FINAL)
-            .build()
-            .setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.ANY);
+                .builder()
+                .activateDefaultTyping(ptv, ObjectMapper.DefaultTyping.NON_FINAL)
+                .build()
+                .setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.ANY);
         jackson2JsonRedisSerializer.setObjectMapper(om);
 
         redisTemplate.setKeySerializer(stringRedisSerializer);
-        redisTemplate.setValueSerializer(stringRedisSerializer);
+        RedisSerializer<?> valueSerializer;
+        if (String.class.isAssignableFrom(type)) {
+            valueSerializer = stringRedisSerializer;
+        } else {
+            valueSerializer = jackson2JsonRedisSerializer;
+        }
+        redisTemplate.setValueSerializer(valueSerializer);
         redisTemplate.setHashKeySerializer(stringRedisSerializer);
-        redisTemplate.setHashValueSerializer(jackson2JsonRedisSerializer);
+        redisTemplate.setHashValueSerializer(valueSerializer);
         redisTemplate.afterPropertiesSet();
+    }
+
+    protected RedisTemplate<String, T> createRedisTemplate(RedisConnectionFactory logRedisConnectionFactory) {
+        RedisTemplate<String, T> redisTemplate = new RedisTemplate<>();
+        redisTemplate.setConnectionFactory(logRedisConnectionFactory);
+        setSerializer(redisTemplate);
+        redisTemplate.setEnableTransactionSupport(true);
+        redisTemplate.afterPropertiesSet();
+
+        return redisTemplate;
     }
 }

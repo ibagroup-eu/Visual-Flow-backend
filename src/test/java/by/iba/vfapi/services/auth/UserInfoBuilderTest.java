@@ -26,14 +26,13 @@ import by.iba.vfapi.model.auth.UserInfoBuilder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.env.Environment;
 import org.springframework.mock.env.MockEnvironment;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
 
 class UserInfoBuilderTest {
     private static final String AUTH_ID = "id";
@@ -49,11 +48,10 @@ class UserInfoBuilderTest {
 
     @Test
     void testMissingProperty() {
-        MockEnvironment env = new MockEnvironment();
+        MockEnvironment missingEnv = new MockEnvironment();
         ObjectNode objectNode = MAPPER.createObjectNode();
-        assertThrows(ConfigurationException.class, () -> {
-            UserInfoBuilder.buildWithEnv(env, objectNode);
-        });
+        assertThrows(ConfigurationException.class, () -> UserInfoBuilder.buildWithEnv(missingEnv, objectNode),
+                "ConfigurationException should be thrown, since param is missing.");
     }
 
     @Test
@@ -63,9 +61,8 @@ class UserInfoBuilderTest {
             .of(AUTH_ID, "test", AUTH_USERNAME, "tester", AUTH_NAME, "abc")
             .forEach((k, v) -> objectNode.set(k, new TextNode(v)));
         objectNode.set(AUTH_EMAIL, null);
-        assertThrows(BadRequestException.class, () -> {
-            UserInfoBuilder.buildWithEnv(env, objectNode);
-        });
+        assertThrows(BadRequestException.class, () -> UserInfoBuilder.buildWithEnv(env, objectNode),
+                "BadRequestException should be thrown, since param is null");
 
     }
 

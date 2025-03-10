@@ -35,4 +35,6 @@ public interface HistoryRepository<T> {
     T findById(String key, String id);
 
     boolean hasKey(String key, String hashKey);
+
+    boolean recordLogs();
 }

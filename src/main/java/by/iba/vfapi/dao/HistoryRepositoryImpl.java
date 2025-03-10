@@ -19,6 +19,8 @@
 
 package by.iba.vfapi.dao;
 
+import by.iba.vfapi.config.redis.RedisConfig;
+import lombok.NoArgsConstructor;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.stereotype.Repository;
 
@@ -28,7 +30,10 @@ import java.util.Map;
  * HistoryRepositoryImpl class.
  */
 @Repository
+@NoArgsConstructor
 public class HistoryRepositoryImpl<T> implements HistoryRepository<T> {
+
+    protected RedisConfig redisConfig;
     protected HashOperations<String, String, T> hashOperations;
 
     /**
@@ -79,12 +84,17 @@ public class HistoryRepositoryImpl<T> implements HistoryRepository<T> {
     /**
      * Check if hash key is already exists in Redis key.
      *
-     * @param key key
-     * @param hashKey  hash key
+     * @param key     key
+     * @param hashKey hash key
      * @return true/false
      */
     @Override
     public boolean hasKey(final String key, final String hashKey) {
         return hashOperations.hasKey(key, hashKey);
+    }
+
+    @Override
+    public boolean recordLogs() {
+        return redisConfig.isRecordLogs();
     }
 }

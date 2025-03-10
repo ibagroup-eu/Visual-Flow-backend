@@ -19,8 +19,10 @@
 
 package by.iba.vfapi.config;
 
+import by.iba.vfapi.config.security.WebSecurityConfig;
+import by.iba.vfapi.dto.jobs.StageType;
 import by.iba.vfapi.services.DateTimeUtils;
-import by.iba.vfapi.services.K8sUtils;
+import by.iba.vfapi.services.utils.K8sUtils;
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
@@ -35,16 +37,17 @@ import io.swagger.v3.oas.models.media.StringSchema;
 import io.swagger.v3.oas.models.media.UUIDSchema;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
-import java.util.Map;
-import java.util.UUID;
 import org.apache.commons.lang3.RandomUtils;
 import org.springdoc.core.GroupedOpenApi;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import static by.iba.vfapi.services.K8sUtils.*;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.util.Map;
+import java.util.UUID;
+
+import static by.iba.vfapi.services.utils.K8sUtils.*;
 
 @Configuration
 public class OpenApiConfig {
@@ -63,6 +66,7 @@ public class OpenApiConfig {
     public static final String SCHEMA_PROJECT_REQUIRE_CPU = "PROJECT_REQUIRE_CPU";
     public static final String SCHEMA_PROJECT_REQUIRE_MEMORY = "PROJECT_REQUIRE_MEMORY";
     public static final String SCHEMA_PROJECT_ACCESS_GRANTS = "PROJECT_ACCESS_GRANTS";
+    public static final String DATASOURCES_FOR_DEMO = "DATASOURCES_FOR_DEMO";
     public static final String SCHEMA_USER = "USER";
     public static final String SCHEMA_USERS = "USERS";
     public static final String SCHEMA_ROLES = "ROLES";
@@ -145,23 +149,23 @@ public class OpenApiConfig {
                                                .example("DEPT = 'II'")), "3"))
             .addOneOfItem(buildEdge(true, "", "2", "3"))
             .addOneOfItem(buildNode(Map.of("name",
-                                           new StringSchema()
-                                               .description("Name of the stage")
-                                               .example("write_to_another_db"),
-                                           JDBC_URL,
-                                           new StringSchema().example("jdbc:db2://example123.com:3308/another"),
-                                           OPERATION,
-                                           new StringSchema().description("Type of operation").example("WRITE"),
-                                           "user",
-                                           new StringSchema().example("user"),
-                                           PASSWORD,
-                                           new StringSchema().example("pw111wp"),
-                                           "schema",
-                                           new StringSchema().example("different_schema"),
-                                           STORAGE,
-                                           new StringSchema().example("DB2"),
-                                           "table",
-                                           new StringSchema().example("2deptUsers")), "5"))
+                    new StringSchema()
+                            .description("Name of the stage")
+                            .example("write_to_another_db"),
+                    JDBC_URL,
+                    new StringSchema().example("jdbc:db2://example123.com:3308/another"),
+                    OPERATION,
+                    new StringSchema().description("Type of operation").example("WRITE"),
+                    "user",
+                    new StringSchema().example("user"),
+                    PASSWORD,
+                    new StringSchema().example("pw111wp"),
+                    "schema",
+                    new StringSchema().example("different_schema"),
+                    STORAGE,
+                    new StringSchema().example("DB2"),
+                    "table",
+                    new StringSchema().example("2deptUsers")), "5"))
             .addOneOfItem(buildEdge(true, "", "3", "5"));
         return graph;
     }
@@ -226,16 +230,16 @@ public class OpenApiConfig {
         Map<String, Schema<?>> values) {
         ObjectSchema item = new ObjectSchema();
         MapSchema valueMap = new MapSchema();
-        values.forEach(valueMap::addProperties);
-        item.addProperties("value", valueMap);
+        values.forEach(valueMap::addProperty);
+        item.addProperty("value", valueMap);
         return item;
     }
 
     private static ObjectSchema buildNode(
         Map<String, Schema<?>> values, String id) {
         return (ObjectSchema) buildGraphItem(values)
-            .addProperties("id", new StringSchema().example(id))
-            .addProperties("vertex", new BooleanSchema().example(true).description("Identifier of node"));
+            .addProperty("id", new StringSchema().example(id))
+            .addProperty("vertex", new BooleanSchema().example(true).description("Identifier of node"));
     }
 
     private static ObjectSchema buildEdge(Boolean isSuccess, String text, String source, String target) {
@@ -245,8 +249,8 @@ public class OpenApiConfig {
                                                     new StringSchema().example(isSuccess),
                                                     "text",
                                                     new StringSchema().example(text)))
-            .addProperties("source", new StringSchema().example(source))
-            .addProperties("target", new StringSchema().example(target));
+            .addProperty("source", new StringSchema().example(source))
+            .addProperty("target", new StringSchema().example(target));
     }
 
     // Note that this method has the following sonar error: java:S138.
@@ -312,17 +316,17 @@ public class OpenApiConfig {
                                                 "Soft cap for RAM resources for the k8s Container,in Gigabytes"))
                             .addSchemas(SCHEMA_PROJECT_ACCESS_GRANTS,
                                         new MapSchema()
-                                            .addProperties("testUser", new StringSchema().example("role-1"))
-                                            .addProperties("another_user_",
+                                            .addProperty("testUser", new StringSchema().example("role-1"))
+                                            .addProperty("another_user_",
                                                            new StringSchema().example("super-role"))
                                             .description("Map between user name and application role"))
                             .addSchemas(SCHEMA_USERS, new ArraySchema()
                                 .items(new MapSchema()
-                                           .addProperties("id",
+                                           .addProperty("id",
                                                           new StringSchema().example("2"))
-                                           .addProperties("name",
+                                           .addProperty("name",
                                                           new StringSchema().example("Jane Doe"))
-                                           .addProperties("username",
+                                           .addProperty("username",
                                                           new StringSchema().example("d0e_jane"))
                                            .description("Map between ServiceAccount annotation name and " +
                                                             "value"))
@@ -349,38 +353,38 @@ public class OpenApiConfig {
                                             .description("Status is determined based on Pod's phase"))
                             .addSchemas(SCHEMA_PIPELINE_NODES_HISTORY,
                                         new ObjectSchema()
-                                                .addProperties("id", new StringSchema().example("1sadwqq-wesfe"))
-                                                .addProperties("startedAt", new StringSchema()
+                                                .addProperty("id", new StringSchema().example("1sadwqq-wesfe"))
+                                                .addProperty("startedAt", new StringSchema()
                                                         .example(DateTimeUtils
                                                                 .getFormattedDateTime(firstTime.toString())))
-                                                .addProperties("finishedAt", new StringSchema()
+                                                .addProperty("finishedAt", new StringSchema()
                                                         .example(DateTimeUtils
                                                                 .getFormattedDateTime(secondTime.toString())))
-                                                .addProperties("status", new StringSchema()
+                                                .addProperty("status", new StringSchema()
                                                         .example(SUCCEEDED_STATUS))
-                                                .addProperties("logId", new StringSchema().example("123123121"))
+                                                .addProperty("logId", new StringSchema().example("123123121"))
                                                 .description("Pipeline nodes history Response dto list"))
                             .addSchemas(SCHEMA_INSTANCE_UUID_ONE, getArgoModifiedIdAsSchema(FIRST_UUID.toString()))
                             .addSchemas(SCHEMA_INSTANCE_UUID_TWO,
                                         getArgoModifiedIdAsSchema(SECOND_UUID.toString()))
                             .addSchemas(SCHEMA_JOB_PARAMS,
                                         new ObjectSchema()
-                                            .addProperties("DRIVER_CORES", new StringSchema().example("1"))
-                                            .addProperties("DRIVER_MEMORY", new StringSchema().example("1"))
-                                            .addProperties("DRIVER_REQUEST_CORES",
+                                            .addProperty("DRIVER_CORES", new StringSchema().example("1"))
+                                            .addProperty("DRIVER_MEMORY", new StringSchema().example("1"))
+                                            .addProperty("DRIVER_REQUEST_CORES",
                                                            new StringSchema().example("0.1"))
-                                            .addProperties("EXECUTOR_CORES", new StringSchema().example("1"))
-                                            .addProperties("EXECUTOR_INSTANCES", new StringSchema().example("2"))
-                                            .addProperties("EXECUTOR_MEMORY", new StringSchema().example("1"))
-                                            .addProperties("EXECUTOR_REQUEST_CORES",
+                                            .addProperty("EXECUTOR_CORES", new StringSchema().example("1"))
+                                            .addProperty("EXECUTOR_INSTANCES", new StringSchema().example("2"))
+                                            .addProperty("EXECUTOR_MEMORY", new StringSchema().example("1"))
+                                            .addProperty("EXECUTOR_REQUEST_CORES",
                                                            new StringSchema().example("0.1"))
-                                            .addProperties("SHUFFLE_PARTITIONS", new StringSchema().example("10"))
-                                            .addProperties("TAGS",
+                                            .addProperty("SHUFFLE_PARTITIONS", new StringSchema().example("10"))
+                                            .addProperty("TAGS",
                                                            new ArraySchema()
                                                                    .items(new StringSchema().example("VF-Demo")))
                                             .description("Job params that will be passed through in a ConfigMap"))
                             .addSchemas(SCHEMA_JOB_DEFINITION,
-                                    new ObjectSchema().addProperties("graph", new ArraySchema()
+                                    new ObjectSchema().addProperty("graph", new ArraySchema()
                                             .items(getGraphSchemaForJob())
                                             .description("This represents a job that consists of 3 stages:READ, " +
                                                     "FILTER and WRITE. It also has all fronted-related data " +
@@ -395,7 +399,7 @@ public class OpenApiConfig {
                                             .addEnumItem("FATAL")
                                             .description("Available log statuses"))
                             .addSchemas(SCHEMA_PIPELINE_DEFINITION,
-                                    new ObjectSchema().addProperties("graph", new ArraySchema()
+                                    new ObjectSchema().addProperty("graph", new ArraySchema()
                                             .items(getGraphSchemaForPipeline())
                                             .description("This represents a pipeline that consists of 2 stages: a " +
                                                     "Job stage and a Notification stage(will be executed only " +
@@ -404,15 +408,15 @@ public class OpenApiConfig {
                     .addSchemas(SCHEMA_CONNECTIONS_DEFINITION,
                             new ObjectSchema().properties(getGraphSchemaForConnections()))
                     .addSchemas(SCHEMA_PIPELINE_PARAMETERS, new ObjectSchema()
-                            .addProperties("NOTIFY_SUCCESS",
+                            .addProperty("NOTIFY_SUCCESS",
                                     new BooleanSchema().example(true).description("Identifier of success notify"))
-                            .addProperties("NOTIFY_FAILURE",
+                            .addProperty("NOTIFY_FAILURE",
                                     new BooleanSchema().example(false).description("Identifier of failure notify"))
-                            .addProperties("RECIPIENTS",
+                            .addProperty("RECIPIENTS",
                                     new ArraySchema()
                                             .items(new StringSchema().example("JaneDoe@email.com"))
                                             .description("List of notification recipients"))
-                            .addProperties("TAGS",
+                            .addProperty("TAGS",
                                     new ArraySchema()
                                             .items(new StringSchema().example("VF-Demo"))
                                             .description("List of tags for grouping pipelines")))
@@ -433,8 +437,8 @@ public class OpenApiConfig {
                                                     "couple custom ones"))
                             .addSchemas(SCHEMA_PIPELINE_STAGE_STATUSES,
                                         new MapSchema()
-                                            .addProperties("2", new StringSchema().example("Failed"))
-                                            .addProperties("3", new StringSchema().example("Succeeded")))
+                                            .addProperty("2", new StringSchema().example("Failed"))
+                                            .addProperty("3", new StringSchema().example("Succeeded")))
                     .addSchemas(SCHEMA_TYPE,
                             new StringSchema()
                                     .addEnumItem("job")
@@ -443,8 +447,13 @@ public class OpenApiConfig {
                                             "Type of history"))
                     .addSchemas(SCHEMA_JOB_HISTORY_LOG_ID,
                             new StringSchema().example("1665591306866"))
-                    .addSchemas(SCHEMA_USER, new StringSchema().example("jane-doe")))
-
+                    .addSchemas(SCHEMA_USER, new StringSchema().example("jane-doe"))
+                    .addSchemas(DATASOURCES_FOR_DEMO, new MapSchema()
+                            .addProperty(StageType.READ.name(), new ArraySchema()
+                                    .items(new StringSchema().example("DATAFRAME")))
+                            .addProperty(StageType.WRITE.name(), new ArraySchema()
+                                    .items(new StringSchema().example("AWS"))))
+            )
             .info(new Info().title("Visual Flow").description("Visual Flow backend API"));
     }
 
@@ -454,7 +463,7 @@ public class OpenApiConfig {
             .builder()
             .group("public")
             .packagesToScan("by.iba.vfapi")
-            .pathsToMatch("/api/**")
+            .pathsToMatch(WebSecurityConfig.API_PATH, WebSecurityConfig.PUBLIC_API_PATH)
             .build();
     }
 

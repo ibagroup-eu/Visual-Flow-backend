@@ -20,18 +20,15 @@
 package by.iba.vfapi.dto.projects;
 
 import by.iba.vfapi.config.OpenApiConfig;
-import by.iba.vfapi.dto.Constants;
-import by.iba.vfapi.exceptions.BadRequestException;
-import io.fabric8.kubernetes.api.model.Quantity;
-import io.fabric8.kubernetes.api.model.ResourceQuotaBuilder;
 import io.swagger.v3.oas.annotations.media.Schema;
-import javax.validation.constraints.NotNull;
-import javax.validation.constraints.Positive;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
+
+import javax.validation.constraints.NotNull;
+import javax.validation.constraints.Positive;
 
 /**
  * Resource quota request DTO class.
@@ -59,36 +56,4 @@ public class ResourceQuotaRequestDto {
     @Positive
     @Schema(ref = OpenApiConfig.SCHEMA_PROJECT_REQUIRE_MEMORY)
     private Float requestsMemory;
-
-    /**
-     * Creating ResourceQuotaBuilder.
-     *
-     * @return ResourceQuotaBuilder
-     */
-    public ResourceQuotaBuilder toResourceQuota() {
-        Quantity limitsCpuQuantity = Quantity.parse(limitsCpu.toString());
-        Quantity requestsCpuQuantity = Quantity.parse(requestsCpu.toString());
-        Quantity limitsMemoryQuantity = Quantity.parse(limitsMemory + Constants.GIGABYTE_QUANTITY);
-        Quantity requestsMemoryQuantity = Quantity.parse(requestsMemory + Constants.GIGABYTE_QUANTITY);
-
-        if (Quantity
-            .getAmountInBytes(requestsCpuQuantity)
-            .compareTo(Quantity.getAmountInBytes(limitsCpuQuantity)) > 0 ||
-            Quantity
-                .getAmountInBytes(requestsMemoryQuantity)
-                .compareTo(Quantity.getAmountInBytes(limitsMemoryQuantity)) > 0) {
-            throw new BadRequestException("Requests can't be greater than limits");
-        }
-
-        return new ResourceQuotaBuilder()
-            .withNewMetadata()
-            .withName(Constants.QUOTA_NAME)
-            .endMetadata()
-            .withNewSpec()
-            .addToHard(Constants.LIMITS_CPU, limitsCpuQuantity)
-            .addToHard(Constants.REQUESTS_CPU, requestsCpuQuantity)
-            .addToHard(Constants.LIMITS_MEMORY, limitsMemoryQuantity)
-            .addToHard(Constants.REQUESTS_MEMORY, requestsMemoryQuantity)
-            .endSpec();
-    }
 }

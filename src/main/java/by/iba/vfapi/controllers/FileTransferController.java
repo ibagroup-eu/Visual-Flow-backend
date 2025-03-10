@@ -19,7 +19,7 @@
 
 package by.iba.vfapi.controllers;
 
-import by.iba.vfapi.services.K8sUtils;
+import by.iba.vfapi.services.utils.K8sUtils;
 import by.iba.vfapi.services.KubernetesService;
 import by.iba.vfapi.services.auth.AuthenticationService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -52,26 +52,25 @@ public class FileTransferController {
     /**
      * Upload local file into cluster.
      *
-     * @param projectID      project id
+     * @param projectId      project id
      * @param uploadFilePath upload file path
      * @param multipartFile  file for upload
      */
     @Operation(summary = "Upload local file",
                description = "Upload local file into container"
     )
-    @PostMapping(value = "{projectID}/files/upload",
+    @PostMapping(value = "{projectId}/files/upload",
                  consumes = {"multipart/form-data"}
     )
     public void uploadFile(
-            @RequestParam("projectID") String projectID,
+            @RequestParam("projectId") String projectId,
             @RequestParam("uploadFilePath") String uploadFilePath,
             @RequestParam("fileToUpload") MultipartFile multipartFile
             ) {
         LOGGER.info(
-                "{} - Uploading local file into cluster container",
-                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()));
+                "{} - Uploading local file into cluster container", authenticationService.getFormattedUserInfo());
         kubernetesService.uploadFile(
-                projectID,
+                projectId,
                 uploadFilePath,
                 K8sUtils.PVC_POD_NAME,
                 multipartFile
@@ -84,7 +83,7 @@ public class FileTransferController {
     /**
      * Download file from cluster container to local.
      *
-     * @param projectID        project name
+     * @param projectId        project name
      * @param fileName         file name
      * @param downloadFilePath download file path
      * @return byte array file
@@ -92,16 +91,16 @@ public class FileTransferController {
     @Operation(summary = "Download file",
             description = "Download file from container to local"
     )
-    @GetMapping("{projectID}/files/download")
+    @GetMapping("{projectId}/files/download")
     public ResponseEntity<byte[]> downloadFile(
-            @RequestParam("projectID") String projectID,
+            @RequestParam("projectId") String projectId,
             @RequestParam("fileName") String fileName,
             @RequestParam("downloadFilePath") String downloadFilePath) {
         LOGGER.info(
                 "{} - Downloading file from cluster to local",
-                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()));
+                authenticationService.getFormattedUserInfo());
         byte[] file = kubernetesService.downloadFile(
-                projectID,
+                projectId,
                 downloadFilePath,
                 K8sUtils.PVC_POD_NAME
         );

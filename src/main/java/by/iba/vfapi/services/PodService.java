@@ -60,9 +60,11 @@ public class PodService {
     @Async
     @SneakyThrows
     public void trackPodEvents(final String projectId, final String jobId) {
-        CountDownLatch latch = new CountDownLatch(1);
-        Watch watch = kubernetesService.watchPod(projectId, jobId, historyRepository, logRepository,latch);
-        latch.await();
-        watch.close();
+        if(historyRepository.recordLogs()){
+            CountDownLatch latch = new CountDownLatch(1);
+            Watch watch = kubernetesService.watchPod(projectId, jobId, historyRepository, logRepository,latch);
+            latch.await();
+            watch.close();
+        }
     }
 }

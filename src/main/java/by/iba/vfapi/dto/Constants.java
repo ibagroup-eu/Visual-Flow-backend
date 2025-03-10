@@ -19,9 +19,10 @@
 
 package by.iba.vfapi.dto;
 
-import java.time.format.DateTimeFormatter;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
+
+import java.time.format.DateTimeFormatter;
 
 /**
  * Class for constants.
@@ -34,7 +35,8 @@ public final class Constants {
     public static final int MAX_DESCRIPTION_LENGTH = 500;
     public static final String PARAM_KEY_PATTERN = "[A-Za-z0-9\\-_]{1,50}";
     public static final String CONNECTION_KEY_PATTERN = "[A-Za-z0-9\\-_]{1,50}";
-    public static final String CONNECTION_NAME = "connectionName";
+    public static final String CONNECTION_NAME_LABEL = "connectionName";
+    public static final String CONNECTION_ID_LABEL = "connectionId";
     public static final String JOB_CONFIG_FIELD = "JOB_CONFIG";
     public static final String JOB_CONFIG_PATH_FIELD = "JOB_CONFIG_PATH";
     public static final String JOB_CONFIG_FILE = "job-cfg.json";
@@ -43,15 +45,20 @@ public final class Constants {
     public static final String PARENT = "parent";
     public static final String TYPE_JOB = "job";
     public static final String TYPE_JOB_CONFIG = "job-config";
+    public static final String TYPE_JOB_DEF = "job-def";
     public static final String JOB_CONFIG_SUFFIX = "-cfg";
+    public static final String JOB_DEF_SUFFIX = "-def";
     public static final String TYPE_PIPELINE = "pipeline";
     public static final String DEFINITION = "definition";
     public static final String LAST_MODIFIED = "lastModified";
 
     public static final String DESCRIPTION_FIELD = "description";
+    public static final String DEMO_FIELD = "isDemo";
+    public static final String VALID_TO_FIELD = "validTo";
     public static final String NAME_FIELD = "projectName";
 
     public static final String JOB_ID_LABEL = "jobId";
+    public static final String JOB_NAME_LABEL = "jobName";
     public static final String DEPENDENT_JOB_IDS = "dependentJobIDs";
     public static final String SPARK_ROLE_LABEL = "spark-role";
     public static final String SPARK_ROLE_EXEC = "executor";
@@ -142,4 +149,12 @@ public final class Constants {
     public static final String PIPELINE_HISTORY = "pipeline_history";
     public static final String PIPELINE_NODE_HISTORY = "pipeline_node_history";
     public static final String LOGS = "logs";
+    public static final String GRAPH_LABEL = "graph";
+    public static final String VALUE_LABEL = "value";
+    public static final String JOBS_LIMIT = "jobsLimit";
+    public static final String PIPELINES_LIMIT = "pipelinesLimit";
+    public static final String DATASOURCE_LIMIT = "datasourceLimit";
+    public static final String SYSTEM_SECRET = "system";
+    public static final String VISUAL_FLOW_RUNTIME_MODE = "VISUAL_FLOW_RUNTIME_MODE";
+    public static final String INTERACTIVE = "INTERACTIVE";
 }

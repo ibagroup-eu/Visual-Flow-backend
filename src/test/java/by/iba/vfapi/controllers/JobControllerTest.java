@@ -20,53 +20,52 @@
 package by.iba.vfapi.controllers;
 
 import by.iba.vfapi.dto.history.HistoryResponseDto;
+import by.iba.vfapi.dto.jobs.JobDto;
 import by.iba.vfapi.dto.jobs.JobOverviewDto;
 import by.iba.vfapi.dto.jobs.JobOverviewListDto;
-import by.iba.vfapi.dto.jobs.JobRequestDto;
-import by.iba.vfapi.dto.jobs.JobResponseDto;
 import by.iba.vfapi.model.JobParams;
 import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.services.JobService;
 import by.iba.vfapi.services.auth.AuthenticationService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class JobControllerTest {
     @Mock
     private JobService jobService;
-    @Mock
-    private AuthenticationService authenticationServiceMock;
-
+    @Spy
+    private AuthenticationService authenticationService = new AuthenticationService();
+    @InjectMocks
     private JobController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new JobController(jobService, authenticationServiceMock);
         UserInfo expected = new UserInfo();
         expected.setName("name");
         expected.setId("id");
         expected.setUsername("username");
         expected.setEmail("email");
-        when(authenticationServiceMock.getUserInfo()).thenReturn(expected);
+        when(authenticationService.getUserInfo()).thenReturn(Optional.of(expected));
     }
 
     @Test
@@ -93,14 +92,14 @@ class JobControllerTest {
 
     @Test
     void testCreate() throws JsonProcessingException {
-        JobRequestDto jobRequestDto = JobRequestDto
+        JobDto jobDto = JobDto
             .builder()
             .definition(new ObjectMapper().readTree("{\"graph\":[]}"))
             .name("newName")
             .params(new JobParams().driverCores("1"))
             .build();
-        when(jobService.create("projectId", jobRequestDto)).thenReturn("jobId");
-        ResponseEntity<String> response = controller.create("projectId", jobRequestDto);
+        when(jobService.create("projectId", jobDto)).thenReturn("jobId");
+        ResponseEntity<String> response = controller.create("projectId", jobDto);
 
         assertEquals(HttpStatus.CREATED, response.getStatusCode(), "Status must be OK");
         assertEquals("jobId", response.getBody(), "Body must be equals to jobId");
@@ -110,35 +109,35 @@ class JobControllerTest {
 
     @Test
     void testUpdate() throws JsonProcessingException {
-        JobRequestDto jobRequestDto = JobRequestDto
+        JobDto jobDto = JobDto
             .builder()
             .definition(new ObjectMapper().readTree("{\"graph\":[]}"))
             .name("newName")
             .params(new JobParams().driverCores("1"))
             .build();
-        doNothing().when(jobService).update("jobId", "projectId", jobRequestDto);
+        doNothing().when(jobService).update("jobId", "projectId", jobDto);
 
-        controller.update("projectId", "jobId", jobRequestDto);
+        controller.update("projectId", "jobId", jobDto);
 
         verify(jobService).update(anyString(), anyString(), any());
     }
 
     @Test
     void testGet() throws IOException {
-        JobResponseDto dto = JobResponseDto
+        JobDto dto = JobDto
             .builder()
             .lastModified("lastModified")
             .definition(new ObjectMapper().readTree("{\"graph\":[]}".getBytes()))
             .name("name")
             .build();
 
-        when(jobService.get("project1", "jobId")).thenReturn(dto);
+        when(jobService.getById("project1", "jobId")).thenReturn(dto);
 
-        JobResponseDto response = controller.get("project1", "jobId");
+        JobDto response = controller.get("project1", "jobId");
 
         assertEquals(dto, response, "Response must be equal to dto");
 
-        verify(jobService).get(anyString(), anyString());
+        verify(jobService).getById(anyString(), anyString());
     }
 
     @Test
@@ -173,9 +172,11 @@ class JobControllerTest {
 
     @Test
     void testRun() {
-        doNothing().when(jobService).run("project1", "jobId");
-        controller.run("project1", "jobId");
-        verify(jobService).run(anyString(), anyString());
+        String expected = "podId";
+        doReturn(expected).when(jobService).run("project1", "jobId", false);
+        ResponseEntity<String> response = controller.run("project1", "jobId", false);
+        assertEquals(expected, response.getBody(), "response should match");
+        verify(jobService).run("project1", "jobId", false);
     }
 
     @Test
@@ -183,5 +184,12 @@ class JobControllerTest {
         doNothing().when(jobService).stop("project1", "jobId");
         controller.stop("project1", "jobId");
         verify(jobService).stop(anyString(), anyString());
+    }
+
+    @Test
+    void testCopy() {
+        doNothing().when(jobService).copy("project1", "jobId");
+        controller.copy("project1", "jobId");
+        verify(jobService).copy(anyString(), anyString());
     }
 }

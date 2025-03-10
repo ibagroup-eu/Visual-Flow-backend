@@ -27,7 +27,7 @@ import by.iba.vfapi.model.history.AbstractHistory;
 import by.iba.vfapi.model.history.PipelineHistory;
 import by.iba.vfapi.model.argo.Workflow;
 import by.iba.vfapi.model.history.PipelineNodeHistory;
-import by.iba.vfapi.services.K8sUtils;
+import by.iba.vfapi.services.utils.K8sUtils;
 import by.iba.vfapi.services.KubernetesService;
 import by.iba.vfapi.services.PipelineService;
 import io.fabric8.kubernetes.client.Watcher;

@@ -19,24 +19,30 @@
 
 package by.iba.vfapi.services;
 
-import by.iba.vfapi.common.LoadFilePodBuilder;
+import by.iba.vfapi.common.LoadFilePodBuilderService;
+import by.iba.vfapi.config.ApplicationConfigurationProperties;
 import by.iba.vfapi.dao.JobHistoryRepository;
 import by.iba.vfapi.dao.LogRepositoryImpl;
 import by.iba.vfapi.dto.Constants;
-import by.iba.vfapi.dto.projects.AccessTableDto;
+import by.iba.vfapi.dto.projects.DemoLimitsDto;
 import by.iba.vfapi.exceptions.BadRequestException;
 import by.iba.vfapi.exceptions.InternalProcessingException;
 import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.services.auth.AuthenticationService;
+import by.iba.vfapi.services.utils.AccessTableUtils;
+import by.iba.vfapi.services.utils.K8sUtils;
 import by.iba.vfapi.services.watchers.PodWatcher;
+import com.fasterxml.jackson.core.JacksonException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
+import io.fabric8.kubernetes.api.model.ConfigMapList;
+import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.Namespace;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
-import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
-import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
+import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.PodStatus;
 import io.fabric8.kubernetes.api.model.ResourceQuota;
@@ -54,28 +60,28 @@ import io.fabric8.kubernetes.client.ConfigBuilder;
 import io.fabric8.kubernetes.client.DefaultKubernetesClient;
 import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
 import io.fabric8.kubernetes.client.RequestConfigBuilder;
-import io.fabric8.kubernetes.client.ResourceNotFoundException;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.dsl.FunctionCallable;
-import java.io.InputStream;
-import java.io.IOException;
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.codec.binary.Base64;
+import org.springframework.security.authentication.InsufficientAuthenticationException;
+import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
+
+import javax.annotation.Nullable;
+import javax.validation.Valid;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-
-import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.codec.binary.Base64;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
 
 /**
  * KubernetesService class.
@@ -94,29 +100,25 @@ public class KubernetesService {
     public static final String NO_POD_MESSAGE = "Pod doesn't exist";
     private static final String POD_STOP_COMMAND = "pkill -SIGTERM -u job-user";
     private static final String PATH_DELIMITER = "/";
+    private static final String SERIALIZE_DS_ERR =
+            "Cannot update demo project '{}', since demo limits have incorrect format: {}";
     private static final int SERVICE_ACCOUNT_WAIT_PERIOD_MIN = 2;
     private static final int POD_WAIT_PERIOD_MIN = 1;
-    protected final String appName;
-    protected final String appNameLabel;
-    protected final String pvcMountPath;
+    private final ApplicationConfigurationProperties appProperties;
     protected final NamespacedKubernetesClient client;
     protected final NamespacedKubernetesClient userClient;
-    private final String imagePullSecret;
     protected final AuthenticationService authenticationService;
+    protected final LoadFilePodBuilderService filePodService;
 
     public KubernetesService(
+        final ApplicationConfigurationProperties appProperties,
         final NamespacedKubernetesClient client,
-        @Value("${namespace.app}") final String appName,
-        @Value("${namespace.label}") final String appNameLabel,
-        @Value("${pvc.mountPath}") final String pvcMountPath,
-        @Value("${job.imagePullSecret}") final String imagePullSecret,
-        final AuthenticationService authenticationService) {
-        this.appName = appName;
-        this.appNameLabel = appNameLabel;
-        this.pvcMountPath = pvcMountPath;
-        this.imagePullSecret = imagePullSecret;
+        final AuthenticationService authenticationService,
+        final LoadFilePodBuilderService filePodService) {
+        this.appProperties = appProperties;
         this.authenticationService = authenticationService;
         this.client = client;
+        this.filePodService = filePodService;
         this.userClient = new DefaultKubernetesClient(new ConfigBuilder(client.getConfiguration())
                                                           .withClientKeyFile(null)
                                                           .withClientCertData(null)
@@ -125,39 +127,19 @@ public class KubernetesService {
                                                           .build());
     }
 
-    /**
-     * Helper method to generate unique name for k8s entity
-     *
-     * @param nameValidator supposed to check whether entity with such name already exists in k8s
-     * @return unique name
-     */
-    public static String getUniqueEntityName(
-        Function<String, Object> nameValidator) {
-        String name = UUID.randomUUID().toString();
-        while (true) {
-            try {
-                Object apply = nameValidator.apply(name);
-                if (apply == null) {
-                    return name;
-                }
-                name = UUID.randomUUID().toString();
-            } catch (ResourceNotFoundException e) {
-                LOGGER.warn("Unique entity name has not been found! {}", e.getLocalizedMessage());
-                break;
-            }
-        }
-        return name;
-    }
-
     protected FunctionCallable<NamespacedKubernetesClient> getAuthenticatedClient(NamespacedKubernetesClient kbClient) {
-        Secret secret = getServiceAccountSecret(authenticationService.getUserInfo().getUsername());
+        Secret secret = getServiceAccountSecret(authenticationService.getUserInfo()
+                .map(UserInfo::getUsername)
+                .orElseThrow(() -> new InsufficientAuthenticationException("Authentication required")));
         String k8sToken = new String(Base64.decodeBase64(secret.getData().get(Constants.TOKEN)),
                 StandardCharsets.UTF_8);
         return kbClient.withRequestConfig(new RequestConfigBuilder().withOauthToken(k8sToken).build());
     }
 
     protected <T> T authenticatedCall(Function<NamespacedKubernetesClient, T> caller) {
-        if (authenticationService.getUserInfo().isSuperuser()) {
+        if (authenticationService.getUserInfo()
+                .map(UserInfo::isSuperuser)
+                .orElse(true)) {
             return caller.apply(client);
         } else {
             return getAuthenticatedClient(this.userClient).call(caller);
@@ -174,7 +156,7 @@ public class KubernetesService {
             .namespaces()
             .create(new NamespaceBuilder(namespace)
                         .editMetadata()
-                        .addToLabels(K8sUtils.APP, appNameLabel)
+                        .addToLabels(K8sUtils.APP, appProperties.getNamespace().getLabel())
                         .endMetadata()
                         .build()));
     }
@@ -198,7 +180,7 @@ public class KubernetesService {
      * @return namespace list.
      */
     public List<Namespace> getNamespaces() {
-        return client.namespaces().withLabel(K8sUtils.APP, appNameLabel).list().getItems();
+        return client.namespaces().withLabel(K8sUtils.APP, appProperties.getNamespace().getLabel()).list().getItems();
     }
 
     /**
@@ -217,6 +199,39 @@ public class KubernetesService {
                                    .build());
                 return ns;
             }));
+    }
+
+    /**
+     * Changes project's demo limits.
+     *
+     * @param namespace   name of namespace.
+     * @param demoLimits new project demoLimits.
+     */
+    public void editDemoLimits(final String namespace, final boolean isDemo, @Valid final DemoLimitsDto demoLimits) {
+        authenticatedCall(authenticatedClient -> authenticatedClient
+                .namespaces()
+                .withName(namespace)
+                .edit((Namespace ns) -> {
+                    try {
+                        ObjectMetaBuilder newMeta = new ObjectMetaBuilder(ns.getMetadata())
+                                .addToAnnotations(Constants.DEMO_FIELD, String.valueOf(isDemo));
+                        if (demoLimits != null) {
+                            newMeta
+                                    .addToAnnotations(Constants.VALID_TO_FIELD,
+                                            demoLimits.getExpirationDate().toString())
+                                    .addToAnnotations(Constants.DATASOURCE_LIMIT, new ObjectMapper()
+                                            .writeValueAsString(demoLimits.getSourcesToShow()))
+                                    .addToAnnotations(Constants.JOBS_LIMIT,
+                                            String.valueOf(demoLimits.getJobsNumAllowed()))
+                                    .addToAnnotations(Constants.PIPELINES_LIMIT,
+                                            String.valueOf(demoLimits.getPipelinesNumAllowed()));
+                        }
+                        ns.setMetadata(newMeta.build());
+                    } catch (JacksonException e) {
+                        LOGGER.error(SERIALIZE_DS_ERR, namespace, e.getLocalizedMessage());
+                    }
+                    return ns;
+                }));
     }
 
     /**
@@ -240,7 +255,7 @@ public class KubernetesService {
             .inNamespace(namespace)
             .createOrReplace(new ResourceQuotaBuilder(resourceQuota)
                                  .editMetadata()
-                                 .addToLabels(K8sUtils.APP, appNameLabel)
+                                 .addToLabels(K8sUtils.APP, appProperties.getNamespace().getLabel())
                                  .endMetadata()
                                  .build()));
     }
@@ -272,7 +287,7 @@ public class KubernetesService {
             .inNamespace(namespace)
             .createOrReplace(new SecretBuilder(secret)
                                  .editMetadata()
-                                 .addToLabels(K8sUtils.APP, appNameLabel)
+                                 .addToLabels(K8sUtils.APP, appProperties.getNamespace().getLabel())
                                  .endMetadata()
                                  .build()));
     }
@@ -371,11 +386,11 @@ public class KubernetesService {
             .map(roleBinding -> new RoleBindingBuilder(roleBinding)
                 .editMetadata()
                 .withName(K8sUtils.getValidK8sName(roleBinding.getMetadata().getName()))
-                .addToLabels(K8sUtils.APP, appNameLabel)
+                .addToLabels(K8sUtils.APP, appProperties.getNamespace().getLabel())
                 .endMetadata()
                 .editSubject(0)
                 .withName(K8sUtils.getValidK8sName(roleBinding.getSubjects().get(0).getName()))
-                .withNamespace(appName)
+                .withNamespace(appProperties.getNamespace().getApp())
                 .endSubject()
                 .build())
             .collect(Collectors.toList());
@@ -433,7 +448,7 @@ public class KubernetesService {
             .rbac()
             .roleBindings()
             .inNamespace(namespace)
-            .withLabel(K8sUtils.APP, appNameLabel)
+            .withLabel(K8sUtils.APP, appProperties.getNamespace().getLabel())
             .list()
             .getItems());
     }
@@ -446,7 +461,7 @@ public class KubernetesService {
     public void createIfNotExistServiceAccount(final UserInfo userInfo) {
         Map<String, String> annotations = Map.of("id",
                                                  userInfo.getId(),
-                                                 AccessTableDto.USERNAME,
+                                                 AccessTableUtils.USERNAME,
                                                  userInfo.getUsername(),
                                                  "name",
                                                  userInfo.getName(),
@@ -454,15 +469,16 @@ public class KubernetesService {
                                                  userInfo.getEmail());
         String saName = K8sUtils.getValidK8sName(userInfo.getUsername());
 
-        if (client.serviceAccounts().inNamespace(appName).withName(saName).get() == null) {
+        if (client.serviceAccounts().inNamespace(appProperties.getNamespace().getApp()).withName(saName)
+                .get() == null) {
             client
                 .serviceAccounts()
-                .inNamespace(appName)
+                .inNamespace(appProperties.getNamespace().getApp())
                 .createOrReplace(new ServiceAccountBuilder()
                     .withNewMetadata()
                     .addToAnnotations(annotations)
                     .withName(saName)
-                    .addToLabels(K8sUtils.APP, appNameLabel)
+                    .addToLabels(K8sUtils.APP, appProperties.getNamespace().getLabel())
                     .endMetadata()
                     .build());
             LOGGER.info("{} - created a new service account - {}, waiting for it to get ready...",
@@ -471,7 +487,7 @@ public class KubernetesService {
 
             client
                 .serviceAccounts()
-                .inNamespace(appName)
+                .inNamespace(appProperties.getNamespace().getApp())
                 .withName(saName)
                 .waitUntilCondition(sa ->
                     sa.getSecrets().stream().anyMatch(secret -> secret.getName().contains(Constants.TOKEN)) &&
@@ -493,7 +509,7 @@ public class KubernetesService {
     public Secret getServiceAccountSecret(final String username) {
         String secretName = client
             .serviceAccounts()
-            .inNamespace(appName)
+            .inNamespace(appProperties.getNamespace().getApp())
             .withName(K8sUtils.getValidK8sName(username))
             .require()
             .getSecrets()
@@ -503,7 +519,7 @@ public class KubernetesService {
             .orElseThrow(() -> new InternalProcessingException("Unable to find service account secret for user: " +
                                                                    username))
             .getName();
-        return client.secrets().inNamespace(appName).withName(secretName).require();
+        return client.secrets().inNamespace(appProperties.getNamespace().getApp()).withName(secretName).require();
     }
 
     /**
@@ -514,8 +530,8 @@ public class KubernetesService {
     public List<ServiceAccount> getServiceAccounts() {
         return client
             .serviceAccounts()
-            .inNamespace(appName)
-            .withLabel(K8sUtils.APP, appNameLabel)
+            .inNamespace(appProperties.getNamespace().getApp())
+            .withLabel(K8sUtils.APP, appProperties.getNamespace().getLabel())
             .list()
             .getItems();
     }
@@ -571,15 +587,16 @@ public class KubernetesService {
      * Creating pod.
      *
      * @param namespace namespace
-     * @param pod       Pod
+     * @param podBuilder       Pod
+     * @return created Pod
      */
-    public void createPod(final String namespace, Pod pod) {
-        authenticatedCall(authenticatedClient -> authenticatedClient
+    public Pod createPod(final String namespace, PodBuilder podBuilder) {
+        return authenticatedCall(authenticatedClient -> authenticatedClient
             .pods()
             .inNamespace(namespace)
-            .createOrReplace(new PodBuilder(pod)
+            .createOrReplace(podBuilder
                                  .editMetadata()
-                                 .addToLabels(K8sUtils.APP, appNameLabel)
+                                 .addToLabels(K8sUtils.APP, appProperties.getNamespace().getLabel())
                                  .endMetadata()
                                  .build()));
 
@@ -726,7 +743,7 @@ public class KubernetesService {
             .inNamespace(namespaceId)
             .createOrReplace(new ConfigMapBuilder(configMap)
                                  .editMetadata()
-                                 .addToLabels(K8sUtils.APP, appNameLabel)
+                                 .addToLabels(K8sUtils.APP, appProperties.getNamespace().getLabel())
                                  .endMetadata()
                                  .build()));
     }
@@ -762,6 +779,21 @@ public class KubernetesService {
     }
 
     /**
+     * Determine, if config map is readable.
+     *
+     * @param namespaceId namespace name
+     * @param name        configmap name
+     * @return true - if config map is readable, otherwise - false.
+     */
+    public boolean isConfigMapReadable(final String namespaceId, final String name) {
+        return authenticatedCall(authenticatedClient -> authenticatedClient
+                .configMaps()
+                .inNamespace(namespaceId)
+                .withName(name)
+                .isReady());
+    }
+
+    /**
      * Getting configmaps by labels.
      *
      * @param namespaceId namespace name
@@ -775,6 +807,27 @@ public class KubernetesService {
             .withLabels(labels)
             .list()
             .getItems());
+    }
+
+    /**
+     * Getting first configmap by label.
+     *
+     * @param namespaceId namespace name
+     * @param labelKey label key
+     * @param labelValue label value
+     * @return configmap
+     */
+    @Nullable
+    public ConfigMap getConfigMapByLabel(final String namespaceId, String labelKey, String labelValue) {
+        ConfigMapList result = authenticatedCall(authenticatedClient -> authenticatedClient
+                .configMaps()
+                .inNamespace(namespaceId)
+                .withLabel(labelKey, labelValue)
+                .list());
+        if (!result.getItems().isEmpty()) {
+            return result.getItems().get(0);
+        }
+        return null;
     }
 
     /**
@@ -822,6 +875,21 @@ public class KubernetesService {
     }
 
     /**
+     * Retrieves a Pod by its namespace and name.
+     *
+     * @param namespaceId the ID of the namespace where the Pod is located
+     * @param name        the name of the Pod to retrieve
+     * @return the Pod object
+     */
+    public Pod getPod(String namespaceId, String name) {
+        return authenticatedCall(authenticatedClient -> authenticatedClient
+                .pods()
+                .inNamespace(namespaceId)
+                .withName(name)
+                .require());
+    }
+
+    /**
      * Getting pod status in namespace by name.
      *
      * @param namespaceId namespace id
@@ -829,11 +897,7 @@ public class KubernetesService {
      * @return pod
      */
     public PodStatus getPodStatus(final String namespaceId, final String name) {
-        return authenticatedCall(authenticatedClient -> authenticatedClient
-            .pods()
-            .inNamespace(namespaceId)
-            .withName(name)
-            .require()).getStatus();
+        return getPod(namespaceId, name).getStatus();
     }
 
     /**
@@ -879,7 +943,7 @@ public class KubernetesService {
             .pods()
             .inNamespace(namespace)
             .withName(podName)
-            .file(pvcMountPath + uploadFilePath)
+            .file(appProperties.getPvc().getMountPath() + uploadFilePath)
             .upload(file.toPath());
         LOGGER.info("The file has uploaded successfully!");
     }
@@ -903,7 +967,7 @@ public class KubernetesService {
                 .pods()
                 .inNamespace(namespace)
                 .withName(podName)
-                .file(pvcMountPath + downloadFilePath)
+                .file(appProperties.getPvc().getMountPath() + downloadFilePath)
                 .read()
         ) {
             result = is.readAllBytes();
@@ -920,8 +984,8 @@ public class KubernetesService {
         if(Boolean.FALSE.equals(isPodExist(namespace, podName))) {
             LOGGER.warn("Couldn't find container {} for upload local files to the cluster. " +
                     "Starting creating the container...", podName);
-            createPod(namespace, LoadFilePodBuilder.getLoadFilePod(
-                    namespace, LoadFilePodBuilder.getBufferPVCPodParams(), pvcMountPath, imagePullSecret)
+            createPod(namespace, filePodService.getLoadFilePod(namespace, filePodService.getBufferPVCPodParams(),
+                    appProperties.getPvc().getMountPath(), appProperties.getJob().getImagePullSecret())
             );
             client
                     .pods()

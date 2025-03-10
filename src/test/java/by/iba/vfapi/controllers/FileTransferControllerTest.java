@@ -6,10 +6,15 @@ import by.iba.vfapi.services.auth.AuthenticationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockMultipartFile;
+
+import java.util.Optional;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
 
@@ -21,19 +26,19 @@ public class FileTransferControllerTest {
     private static final String POD_NAME = "vf-k8s-pvc";
     @Mock
     private KubernetesService kubernetesService;
-    @Mock
-    private AuthenticationService authenticationServiceMock;
-    @Mock
+    @Spy
+    private AuthenticationService authenticationService = new AuthenticationService();
+    @InjectMocks
     private FileTransferController controller;
+
     @BeforeEach
     void setUp() {
-        controller = new FileTransferController(kubernetesService, authenticationServiceMock);
         UserInfo expected = new UserInfo();
         expected.setName("name");
         expected.setId("id");
         expected.setUsername("username");
         expected.setEmail("email");
-        when(authenticationServiceMock.getUserInfo()).thenReturn(expected);
+        when(authenticationService.getUserInfo()).thenReturn(Optional.of(expected));
     }
 
     @Test

@@ -26,11 +26,14 @@ import by.iba.vfapi.services.auth.AuthenticationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -39,21 +42,21 @@ import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class LogControllerTest {
-    @Mock
-    private AuthenticationService authenticationServiceMock;
+    @Spy
+    private AuthenticationService authenticationService = new AuthenticationService();
     @Mock
     private LogService logService;
+    @InjectMocks
     private LogController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new LogController(authenticationServiceMock, logService);
         UserInfo expected = new UserInfo();
         expected.setName("name");
         expected.setId("id");
         expected.setUsername("username");
         expected.setEmail("email");
-        when(authenticationServiceMock.getUserInfo()).thenReturn(expected);
+        when(authenticationService.getUserInfo()).thenReturn(Optional.of(expected));
     }
 
 

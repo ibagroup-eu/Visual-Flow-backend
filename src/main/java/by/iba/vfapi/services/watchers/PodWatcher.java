@@ -23,8 +23,10 @@ import by.iba.vfapi.dao.JobHistoryRepository;
 import by.iba.vfapi.dao.LogRepositoryImpl;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.model.history.JobHistory;
-import by.iba.vfapi.services.K8sUtils;
+import by.iba.vfapi.services.utils.K8sUtils;
+import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.ContainerStateTerminated;
+import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
 import io.fabric8.kubernetes.client.Watcher;
@@ -72,18 +74,41 @@ public class PodWatcher implements Watcher<Pod> {
             pod.getStatus().getPhase().equals(K8sUtils.SUCCEEDED_STATUS))) {
             String timeStampMillis = String.valueOf(Instant.now().toEpochMilli());
             String key = pod.getMetadata().getNamespace() + "_" + pod.getMetadata().getName();
-            JobHistory history = new JobHistory(
-                pod.getMetadata().getName(),
-                pod.getMetadata().getLabels().get(Constants.TYPE),
-                pod.getStatus().getStartTime(),
-                K8sUtils.extractTerminatedStateField(pod.getStatus(), ContainerStateTerminated::getFinishedAt),
-                pod.getMetadata().getLabels().get(Constants.STARTED_BY),
-                pod.getStatus().getPhase());
-            historyRepository.add(key, timeStampMillis, history);
+            if (!isInteractiveMode(pod)) {
+                JobHistory history = new JobHistory(
+                        pod.getMetadata().getName(),
+                        pod.getMetadata().getLabels().get(Constants.TYPE),
+                        pod.getStatus().getStartTime(),
+                        K8sUtils.extractTerminatedStateField(pod.getStatus(), ContainerStateTerminated::getFinishedAt),
+                        pod.getMetadata().getLabels().get(Constants.STARTED_BY),
+                        pod.getStatus().getPhase());
+                historyRepository.add(key, timeStampMillis, history);
+                LOGGER.info("Job's history successfully saved: {}", history);
+            } else {
+                LOGGER.info("Job is running in interactive mode with uid {}, skipping history",
+                        pod.getMetadata().getUid());
+            }
             saveLogs(key, timeStampMillis, pod);
-            LOGGER.info("Job's history successfully saved: {}", history);
             latch.countDown();
         }
+    }
+
+    /**
+     * Checks if the pod has an environment variable VISUAL_FLOW_RUNTIME_MODE with value INTERACTIVE.
+     *
+     * @param pod the pod to check
+     * @return true if the environment variable is found with the specified value, false otherwise
+     */
+    private static boolean isInteractiveMode(Pod pod) {
+        for (Container container : pod.getSpec().getContainers()) {
+            for (EnvVar envVar : container.getEnv()) {
+                if (Constants.VISUAL_FLOW_RUNTIME_MODE.equals(envVar.getName())
+                        && Constants.INTERACTIVE.equals(envVar.getValue())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**

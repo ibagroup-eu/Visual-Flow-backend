@@ -19,7 +19,8 @@
 
 package by.iba.vfapi.config.redis;
 
-import org.springframework.beans.factory.annotation.Value;
+import by.iba.vfapi.config.ApplicationConfigurationProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.jedis.JedisConnectionFactory;
@@ -29,18 +30,21 @@ import org.springframework.data.redis.core.RedisTemplate;
  * Configuration class for LogRedisConfig.
  */
 @Configuration
-public class LogRedisConfig extends RedisConfig {
-    @Value("${redis.logDatabase}")
-    private Integer database = null;
+public class LogRedisConfig extends RedisConfig<String> {
+
+    @Autowired
+    public LogRedisConfig(ApplicationConfigurationProperties appProperties) {
+        super(appProperties, String.class);
+    }
 
     /**
      * Configure redis connection factory for logs.
      *
-     * @return
+     * @return JedisConnectionFactory
      */
     @Bean
     public JedisConnectionFactory logRedisConnectionFactory() {
-        return jedisConnectionFactory(database);
+        return jedisConnectionFactory(appProperties.getRedis().getLogDatabase());
     }
 
     /**
@@ -49,12 +53,7 @@ public class LogRedisConfig extends RedisConfig {
      * @return instance of RedisTemplate
      */
     @Bean(name = "logRedisTemplate")
-    public RedisTemplate logRedisTemplate() {
-        RedisTemplate<String, Object> redisTemplate = new RedisTemplate<>();
-        redisTemplate.setConnectionFactory(logRedisConnectionFactory());
-        setSerializer(redisTemplate);
-        redisTemplate.afterPropertiesSet();
-
-        return redisTemplate;
+    public RedisTemplate<String, String> logRedisTemplate() {
+        return createRedisTemplate(logRedisConnectionFactory());
     }
 }

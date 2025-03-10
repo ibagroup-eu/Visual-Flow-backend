@@ -20,7 +20,6 @@
 package by.iba.vfapi.dto.projects;
 
 import by.iba.vfapi.config.OpenApiConfig;
-import by.iba.vfapi.dto.Constants;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
@@ -30,8 +29,6 @@ import lombok.Setter;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
 import javax.validation.constraints.NotNull;
-import javax.validation.constraints.Pattern;
-
 
 /**
  * Connection DTO class.
@@ -44,9 +41,7 @@ import javax.validation.constraints.Pattern;
 @ToString
 @Schema(description = "DTO that represents project connections")
 public class ConnectDto {
-    @NotNull
-    @Pattern(regexp = Constants.CONNECTION_KEY_PATTERN)
-    @Schema(description = "Connection's name", example = "TestConnection1")
+    @Schema(description = "Connection unique id")
     private String key;
     @NotNull
     @Schema(description = "Connection's value. A set of connections in JSON format",

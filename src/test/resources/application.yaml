@@ -75,12 +75,12 @@ pvc:
   mountPath: "/files"
   accessModes: ReadWriteMany
 job:
-  imagePullSecret: test
+  imagePullSecret: imagePullSecret
   spark:
     master: test
     image: test
-    serviceAccount: test
-    roleBinding: test
+    serviceAccount: spark
+    roleBinding: spark-edit
     podStopCommand: "pkill -SIGTERM -u job-user"
   config:
     mountPath: \test
@@ -104,3 +104,7 @@ redis:
   jobHistoryDatabase: 1
   pipelineHistoryDatabase: 2
   logDatabase: 3
+  recordLogs: true
+  jobMetadataDatabase: 4
+  jobDefinitionDatabase: 5
+  jobEventDatabase: 6

@@ -19,17 +19,21 @@
 
 package by.iba.vfapi.common;
 
+import by.iba.vfapi.config.ApplicationConfigurationProperties;
 import by.iba.vfapi.dto.Constants;
-import by.iba.vfapi.services.K8sUtils;
-import io.fabric8.kubernetes.api.model.Pod;
+import by.iba.vfapi.services.utils.K8sUtils;
 import io.fabric8.kubernetes.api.model.PodBuilder;
-import lombok.experimental.UtilityClass;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
 import java.util.Map;
 
-@UtilityClass
-public class LoadFilePodBuilder {
+@RequiredArgsConstructor
+@Service
+public class LoadFilePodBuilderService {
+
+    private final ApplicationConfigurationProperties appProperties;
 
     /**
      * Initialize Pod for mounting to PVC.
@@ -40,7 +44,7 @@ public class LoadFilePodBuilder {
      * @param imagePullSecret image pull secret name.
      * @return pod.
      */
-    public static Pod getLoadFilePod(
+    public PodBuilder getLoadFilePod(
             String id, Map<String, String> params, String pvcMountPath, String imagePullSecret) {
         return new PodBuilder()
                 .withNewMetadata()
@@ -63,7 +67,7 @@ public class LoadFilePodBuilder {
                                 "do echo Running buffer container for uploading/downloading files; " +
                                 "sleep 100;done"
                 )
-                .withImage(K8sUtils.PVC_POD_IMAGE)
+                .withImage(appProperties.getPvc().getImage())
                 .withImagePullPolicy("IfNotPresent")
                 .addNewVolumeMount()
                 .withName(K8sUtils.PVC_VOLUME_NAME)
@@ -78,8 +82,7 @@ public class LoadFilePodBuilder {
                 .endVolume()
                 .addNewImagePullSecret(imagePullSecret)
                 .withRestartPolicy("Always")
-                .endSpec()
-                .build();
+                .endSpec();
     }
 
     /**
@@ -87,7 +90,7 @@ public class LoadFilePodBuilder {
      *
      * @return resource parameters.
      */
-    public static Map<String, String> getBufferPVCPodParams() {
+    public Map<String, String> getBufferPVCPodParams() {
         Map<String, String> params = new HashMap<>();
         params.put(Constants.DRIVER_CORES, Constants.DRIVER_CORES_VALUE);
         params.put(Constants.DRIVER_MEMORY, Constants.DRIVER_MEMORY_VALUE);

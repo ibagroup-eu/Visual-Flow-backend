@@ -20,35 +20,31 @@
 package by.iba.vfapi.dto.pipelines;
 
 import by.iba.vfapi.config.OpenApiConfig;
-import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.model.argo.PipelineParams;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.media.Schema;
-import javax.validation.constraints.NotNull;
-import javax.validation.constraints.Pattern;
 import lombok.AllArgsConstructor;
-import lombok.Getter;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.experimental.SuperBuilder;
 
 /**
- * Pipeline DTO class.
+ * Pipeline response DTO class.
+ * Contains the basic information from {@link PipelineOverviewDto},
+ * as well as the graph and parameters.
  */
-@AllArgsConstructor
 @NoArgsConstructor
-@Getter
-@Setter
-@Schema(description = "DTO with pipeline's information, including it's definition and graph")
-public class PipelineRequestDto {
-    @NotNull
-    @Pattern(regexp = Constants.NAME_PATTERN, message = "The name should only consist of alphanumerics or ' " +
-        "\\-_' characters and have a total length between 3 and 40 characters max")
-    @Schema(description = "Name of the pipeline", example = "test_pipe321")
-    private String name;
-    @NotNull
+@AllArgsConstructor
+@Data
+@EqualsAndHashCode(callSuper = true)
+@SuperBuilder
+@Schema(description = "DTO with basic information about pipeline that's extended with it's definition")
+public class PipelineDto extends PipelineOverviewDto {
     @Schema(ref = OpenApiConfig.SCHEMA_PIPELINE_DEFINITION)
     private JsonNode definition;
-
+    @Schema(description = "Whether a current user can modify the pipeline")
+    private boolean editable;
     @Schema(ref = OpenApiConfig.SCHEMA_PIPELINE_PARAMETERS)
     private PipelineParams params;
 }

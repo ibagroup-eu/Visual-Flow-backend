@@ -23,32 +23,31 @@ import by.iba.vfapi.exceptions.ConfigurationException;
 import io.argoproj.workflow.apis.WorkflowServiceApi;
 import io.fabric8.kubernetes.client.DefaultKubernetesClient;
 import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
-import java.security.KeyManagementException;
-import java.security.KeyStoreException;
-import java.security.NoSuchAlgorithmException;
-import java.security.cert.X509Certificate;
-import javax.net.ssl.SSLContext;
+import lombok.RequiredArgsConstructor;
 import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
 import org.apache.http.conn.ssl.TrustStrategy;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.ssl.SSLContexts;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 
+import javax.net.ssl.SSLContext;
+import java.security.KeyManagementException;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.X509Certificate;
+
 /**
  * Configuration class for common configs.
  */
 @Configuration
+@RequiredArgsConstructor
 public class AppConfig {
-    private final String argoServerUrl;
 
-    public AppConfig(@Value("${argo.serverUrl}") String argoServerUrl) {
-        this.argoServerUrl = argoServerUrl;
-    }
+    private final ApplicationConfigurationProperties appProperties;
 
     /**
      * Kubernetes client.
@@ -69,7 +68,7 @@ public class AppConfig {
     public WorkflowServiceApi getApiInstance() {
         return new WorkflowServiceApi(io.argoproj.workflow.Configuration
                                           .getDefaultApiClient()
-                                          .setBasePath(argoServerUrl));
+                                          .setBasePath(appProperties.getArgo().getServerUrl()));
     }
 
 

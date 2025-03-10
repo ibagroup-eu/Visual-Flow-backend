@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -56,11 +57,11 @@ public class UserController {
     @Operation(summary = "Get current user's information", description = "Get essential information about " +
         "current user")
     @GetMapping("/user")
-    public UserInfo whoAmI() {
+    public ResponseEntity<UserInfo> whoAmI() {
         LOGGER.info(
             "{} - Receiving information about current user",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()));
-        return authenticationService.getUserInfo();
+            authenticationService.getFormattedUserInfo());
+        return ResponseEntity.of(authenticationService.getUserInfo());
     }
 
     /**
@@ -75,7 +76,7 @@ public class UserController {
     public List<Map<String, String>> getUsers() {
         LOGGER.info(
             "{} - Receiving users of application",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()));
+            authenticationService.getFormattedUserInfo());
         return userService.getUsers();
     }
 
@@ -91,7 +92,7 @@ public class UserController {
     public List<String> getRoles() {
         LOGGER.info(
             "{} - Receiving roles of application",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()));
+            authenticationService.getFormattedUserInfo());
         return userService.getRoleNames();
     }
 }

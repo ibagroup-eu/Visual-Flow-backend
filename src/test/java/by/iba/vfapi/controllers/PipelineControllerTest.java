@@ -22,10 +22,9 @@ package by.iba.vfapi.controllers;
 import by.iba.vfapi.dto.history.PipelineHistoryResponseDto;
 import by.iba.vfapi.dto.history.PipelineNodesHistoryResponseDto;
 import by.iba.vfapi.dto.pipelines.CronPipelineDto;
+import by.iba.vfapi.dto.pipelines.PipelineDto;
 import by.iba.vfapi.dto.pipelines.PipelineOverviewDto;
 import by.iba.vfapi.dto.pipelines.PipelineOverviewListDto;
-import by.iba.vfapi.dto.pipelines.PipelineRequestDto;
-import by.iba.vfapi.dto.pipelines.PipelineResponseDto;
 import by.iba.vfapi.model.argo.PipelineParams;
 import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.services.PipelineService;
@@ -33,32 +32,33 @@ import by.iba.vfapi.services.auth.AuthenticationService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class PipelineControllerTest {
     @Mock
     private PipelineService pipelineService;
     private PipelineController pipelineController;
-    @Mock
-    private AuthenticationService authenticationService;
+    @Spy
+    private AuthenticationService authenticationService = new AuthenticationService();
 
     @BeforeEach
     void setUp() {
@@ -68,19 +68,18 @@ class PipelineControllerTest {
         expected.setId("id");
         expected.setUsername("username");
         expected.setEmail("email");
-        when(authenticationService.getUserInfo()).thenReturn(expected);
+        when(authenticationService.getUserInfo()).thenReturn(Optional.of(expected));
     }
 
     @Test
     void testCreate() throws JsonProcessingException {
-
-        when(pipelineService.create("projectId", "name",
+        when(pipelineService.create("projectId", null,
                 new ObjectMapper().readTree("{\"graph\":[]}"), new PipelineParams()))
             .thenReturn("id");
         JsonNode graph = new ObjectMapper().readTree("{\"graph\":[]}");
         PipelineParams params = new PipelineParams();
         ResponseEntity<String> response =
-            pipelineController.create("projectId", new PipelineRequestDto("name", graph, params));
+            pipelineController.create("projectId", new PipelineDto(graph, true, params));
 
         assertEquals(HttpStatus.CREATED, response.getStatusCode(), "Status must be OK");
         assertEquals("id", response.getBody(), "Body must be equals to Id");
@@ -88,12 +87,14 @@ class PipelineControllerTest {
 
     @Test
     void testGet() throws IOException {
-        PipelineResponseDto dto =
-            ((PipelineResponseDto) new PipelineResponseDto().lastModified("lastModified").name("name")).definition(
-                new ObjectMapper().readTree("{\"graph\":[]}".getBytes()));
+        PipelineDto dto = PipelineDto.builder()
+                .lastModified("lastModified")
+                .name("name")
+                .definition(new ObjectMapper().readTree("{\"graph\":[]}".getBytes()))
+                .build();
 
         when(pipelineService.getById("projectId", "id")).thenReturn(dto);
-        PipelineResponseDto response = pipelineController.get("projectId", "id");
+        PipelineDto response = pipelineController.get("projectId", "id");
 
         assertEquals(dto, response, "Response must be equals to dto");
     }
@@ -102,14 +103,13 @@ class PipelineControllerTest {
     void testUpdate() throws JsonProcessingException {
         doNothing()
             .when(pipelineService)
-            .update("projectName", "name", new ObjectMapper().readTree("{\"graph\":[]}"),
-                    new PipelineParams(),"newName");
+            .update("projectName", "name", null, new PipelineParams(), new ObjectMapper().readTree("{\"graph\":[]}")
+            );
         JsonNode graph = new ObjectMapper().readTree("{\"graph\":[]}");
         PipelineParams params = new PipelineParams();
-        pipelineController.update("projectName", "name", new PipelineRequestDto("newName", graph, params));
+        pipelineController.update("projectName", "name", new PipelineDto(graph, true, params));
 
-        verify(pipelineService).update(anyString(), anyString(), any(JsonNode.class),
-                any(PipelineParams.class), anyString());
+        verify(pipelineService).update(anyString(), anyString(), isNull(), any(PipelineParams.class), any(JsonNode.class));
     }
 
     @Test
@@ -259,5 +259,12 @@ class PipelineControllerTest {
 
         pipelineController.getPipelineHistory("projectId", "id");
         verify(pipelineService).getPipelineHistory(anyString(), anyString());
+    }
+
+    @Test
+    void testCopy() {
+        doNothing().when(pipelineService).copy("project1", "jobId");
+        pipelineController.copy("project1", "jobId");
+        verify(pipelineService).copy(anyString(), anyString());
     }
 }

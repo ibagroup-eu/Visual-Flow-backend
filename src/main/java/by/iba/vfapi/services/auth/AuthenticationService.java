@@ -21,11 +21,16 @@ package by.iba.vfapi.services.auth;
 
 import by.iba.vfapi.model.auth.UserInfo;
 import lombok.NoArgsConstructor;
-import org.springframework.security.authentication.InsufficientAuthenticationException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
 
 /**
  * Authentication service.
@@ -38,12 +43,16 @@ public class AuthenticationService {
      *
      * @return user info.
      */
-    public UserInfo getUserInfo() {
-        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        if (principal instanceof UserInfo) {
-            return (UserInfo) principal;
-        }
-        throw new InsufficientAuthenticationException("Can't retrieve user info. Is null? " + (principal == null));
+    public Optional<UserInfo> getUserInfo() {
+        return Optional.ofNullable(SecurityContextHolder.getContext())
+                .map(SecurityContext::getAuthentication)
+                .map(Authentication::getPrincipal)
+                .map((Object principal) -> {
+                    if (principal instanceof UserInfo) {
+                        return (UserInfo) principal;
+                    }
+                    return null;
+                });
     }
 
     /**
@@ -52,7 +61,8 @@ public class AuthenticationService {
      * @param userInfo user info.
      */
     public void setUserInfo(UserInfo userInfo) {
-        Authentication authentication = new UsernamePasswordAuthenticationToken(userInfo, null);
+        List<SimpleGrantedAuthority> authorities = Collections.singletonList(new SimpleGrantedAuthority("USER"));
+        Authentication authentication = new UsernamePasswordAuthenticationToken(userInfo, null, authorities);
         SecurityContextHolder.getContext().setAuthentication(authentication);
     }
 
@@ -69,5 +79,9 @@ public class AuthenticationService {
             userInfo.getEmail(),
             userInfo.isSuperuser() ? "[superuser]" : ""
         );
+    }
+
+    public String getFormattedUserInfo() {
+        return getUserInfo().map(AuthenticationService::getFormattedUserInfo).orElse("Anonymous");
     }
 }

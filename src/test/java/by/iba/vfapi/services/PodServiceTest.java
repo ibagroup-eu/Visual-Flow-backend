@@ -19,6 +19,8 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.common.LoadFilePodBuilderService;
+import by.iba.vfapi.config.ApplicationConfigurationProperties;
 import by.iba.vfapi.dao.JobHistoryRepository;
 import by.iba.vfapi.dao.LogRepositoryImpl;
 import by.iba.vfapi.model.auth.UserInfo;
@@ -35,16 +37,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.net.HttpURLConnection;
+import java.util.Optional;
 
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class PodServiceTest {
     private final KubernetesServer server = new KubernetesServer();
-    private static final String APP_NAME = "vf";
-    private static final String APP_NAME_LABEL = "testApp";
-    private static final String PVC_MOUNT_PATH = "/files";
-    private static final String IMAGE_PULL_SECRET = "vf-dev-image-pull";
     private static final Long EVENT_WAIT_PERIOD_MS = 10L;
 
     @Mock
@@ -56,12 +55,15 @@ class PodServiceTest {
     @Mock
     private LogRepositoryImpl logRepository;
     private PodService podService;
+    @Mock
+    private ApplicationConfigurationProperties appProperties;
+    @Mock
+    private LoadFilePodBuilderService filePodService;
 
     @BeforeEach
     void setUp() {
         server.before();
-        this.kubernetesService = new KubernetesService(
-            server.getClient(), APP_NAME, APP_NAME_LABEL, PVC_MOUNT_PATH, IMAGE_PULL_SECRET, authenticationServiceMock);
+        this.kubernetesService = new KubernetesService(appProperties, server.getClient(), authenticationServiceMock, filePodService);
         this.podService = new PodService(kubernetesService, historyRepository, logRepository);
     }
 
@@ -72,16 +74,18 @@ class PodServiceTest {
 
     @Test
     void testTrackPodEvents() {
-        mockAuthenticationService();
 
+        when(historyRepository.recordLogs()).thenReturn(true);
+
+        mockAuthenticationService();
         server.expect()
-            .withPath("/api/v1/namespaces/vf/pods?fieldSelector=metadata.name%3Dpod1&watch=true")
-            .andUpgradeToWebSocket()
-            .open()
-            .waitFor(EVENT_WAIT_PERIOD_MS)
-            .andEmit(outdatedEvent())
-            .done()
-            .once();
+                .withPath("/api/v1/namespaces/vf/pods?fieldSelector=metadata.name%3Dpod1&watch=true")
+                .andUpgradeToWebSocket()
+                .open()
+                .waitFor(EVENT_WAIT_PERIOD_MS)
+                .andEmit(outdatedEvent())
+                .done()
+                .once();
 
         podService.trackPodEvents("vf", "pod1");
     }
@@ -89,7 +93,7 @@ class PodServiceTest {
     private void mockAuthenticationService() {
         UserInfo ui = new UserInfo();
         ui.setSuperuser(true);
-        when(authenticationServiceMock.getUserInfo()).thenReturn(ui);
+        when(authenticationServiceMock.getUserInfo()).thenReturn(Optional.of(ui));
     }
 
     private static WatchEvent outdatedEvent() {

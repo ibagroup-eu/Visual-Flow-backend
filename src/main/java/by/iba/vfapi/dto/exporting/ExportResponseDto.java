@@ -19,14 +19,15 @@
 
 package by.iba.vfapi.dto.exporting;
 
-import by.iba.vfapi.model.argo.WorkflowTemplate;
-import io.fabric8.kubernetes.api.model.ConfigMap;
+import by.iba.vfapi.dto.jobs.JobDto;
+import by.iba.vfapi.dto.pipelines.PipelineDto;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Schema;
-import java.util.Set;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
+
+import java.util.Set;
 
 /**
  * Export response DTO class.
@@ -37,7 +38,7 @@ import lombok.Getter;
 @Schema(description = "DTO with exported jobs/pipelines in serialized JSON format")
 public class ExportResponseDto {
     @ArraySchema(arraySchema = @Schema(description = "List of exported jobs' structures"))
-    private final Set<ConfigMap> jobs;
+    private final Set<JobDto> jobs;
     @ArraySchema(arraySchema = @Schema(description = "List of exported pipelines' structures"))
-    private final Set<WorkflowTemplate> pipelines;
+    private final Set<PipelineDto> pipelines;
 }

@@ -23,6 +23,7 @@ package by.iba.vfapi.services;
 import by.iba.vfapi.dao.LogRepository;
 import by.iba.vfapi.dao.LogRepositoryImpl;
 import by.iba.vfapi.dto.LogDto;
+import by.iba.vfapi.services.utils.K8sUtils;
 import io.fabric8.kubernetes.client.ResourceNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

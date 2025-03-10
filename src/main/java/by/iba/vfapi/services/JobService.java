@@ -19,29 +19,41 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.config.ApplicationConfigurationProperties;
 import by.iba.vfapi.dao.JobHistoryRepository;
 import by.iba.vfapi.dto.Constants;
+import by.iba.vfapi.dto.DataSource;
 import by.iba.vfapi.dto.GraphDto;
 import by.iba.vfapi.dto.ResourceUsageDto;
 import by.iba.vfapi.dto.history.HistoryResponseDto;
+import by.iba.vfapi.dto.jobs.JobDto;
 import by.iba.vfapi.dto.jobs.JobOverviewDto;
 import by.iba.vfapi.dto.jobs.JobOverviewListDto;
-import by.iba.vfapi.dto.jobs.JobRequestDto;
-import by.iba.vfapi.dto.jobs.JobResponseDto;
 import by.iba.vfapi.dto.jobs.PipelineJobOverviewDto;
+import by.iba.vfapi.dto.projects.ConnectDto;
 import by.iba.vfapi.dto.projects.ParamDto;
-import by.iba.vfapi.dto.projects.ParamsDto;
+import by.iba.vfapi.dto.projects.ProjectResponseDto;
 import by.iba.vfapi.exceptions.BadRequestException;
 import by.iba.vfapi.exceptions.ConflictException;
 import by.iba.vfapi.exceptions.InternalProcessingException;
+import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.model.history.JobHistory;
 import by.iba.vfapi.services.auth.AuthenticationService;
+import by.iba.vfapi.services.utils.GraphUtils;
+import by.iba.vfapi.services.utils.JobUtils;
+import by.iba.vfapi.services.utils.K8sUtils;
+import by.iba.vfapi.services.utils.ParamUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.common.collect.ImmutableList;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.ContainerStateTerminated;
 import io.fabric8.kubernetes.api.model.EnvFromSourceBuilder;
+import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
 import io.fabric8.kubernetes.api.model.KeyToPathBuilder;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
@@ -52,20 +64,27 @@ import io.fabric8.kubernetes.api.model.metrics.v1beta1.PodMetrics;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.ResourceNotFoundException;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
+import org.apache.commons.codec.binary.Base64;
+import org.jetbrains.annotations.NotNull;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
+import javax.annotation.Nullable;
 import javax.validation.Valid;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Paths;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+
+import static by.iba.vfapi.dto.Constants.*;
 
 /**
  * JobService class.
@@ -77,13 +96,7 @@ import java.util.stream.Collectors;
 // should not be coupled to too many other classes (Single Responsibility Principle).
 public class JobService {
 
-    private final String jobImage;
-    private final String jobMaster;
-    private final String imagePullSecret;
-    private final String pvcMountPath;
-    private final String jobConfigMountPath;
     private final String jobConfigFullPath;
-    private final String serviceAccount;
     private final KubernetesService kubernetesService;
     private final ArgoKubernetesService argoKubernetesService;
     private final AuthenticationService authenticationService;
@@ -91,36 +104,33 @@ public class JobService {
     private final ProjectService projectService;
     private final DependencyHandlerService dependencyHandlerService;
     private final JobHistoryRepository historyRepository;
+    private final JobSessionService jobSessionService;
+    private final ValidatorService validatorService;
+    private final ApplicationConfigurationProperties appProperties;
 
 
     // Note that this constructor has the following sonar error: java:S107 - Methods should not have too many
     // parameters. This error has been added to ignore list due to the current inability to solve this problem.
     public JobService(
-        @Value("${job.spark.image}") final String jobImage,
-        @Value("${job.spark.master}") final String jobMaster,
-        @Value("${job.spark.serviceAccount}") final String serviceAccount,
-        @Value("${job.imagePullSecret}") final String imagePullSecret,
-        @Value("${pvc.mountPath}") final String pvcMountPath,
-        @Value("${job.config.mountPath}") final String jobConfigMountPath,
-        KubernetesService kubernetesService,
-        DependencyHandlerService dependencyHandlerService,
-        ArgoKubernetesService argoKubernetesService,
-        final AuthenticationService authenticationService,
-        final PodService podService,
-        final ProjectService projectService,
-        final JobHistoryRepository historyRepository) {
-        this.jobImage = jobImage;
-        this.jobMaster = jobMaster;
-        this.serviceAccount = serviceAccount;
-        this.imagePullSecret = imagePullSecret;
-        this.pvcMountPath = pvcMountPath;
-        this.jobConfigMountPath = jobConfigMountPath;
-        this.jobConfigFullPath = Paths.get(jobConfigMountPath, Constants.JOB_CONFIG_FILE).toString();
+            KubernetesService kubernetesService,
+            DependencyHandlerService dependencyHandlerService,
+            ArgoKubernetesService argoKubernetesService,
+            final AuthenticationService authenticationService,
+            final PodService podService,
+            final ProjectService projectService,
+            final JobHistoryRepository historyRepository, JobSessionService jobSessionService,
+            final ValidatorService validatorService,
+            final ApplicationConfigurationProperties appProperties) {
+        this.jobSessionService = jobSessionService;
+        this.appProperties = appProperties;
+        this.jobConfigFullPath = Paths.get(appProperties.getJob().getConfig().getMountPath(),
+                Constants.JOB_CONFIG_FILE).toString();
         this.kubernetesService = kubernetesService;
         this.argoKubernetesService = argoKubernetesService;
         this.authenticationService = authenticationService;
         this.podService = podService;
         this.projectService = projectService;
+        this.validatorService = validatorService;
         this.dependencyHandlerService = dependencyHandlerService;
         this.historyRepository = historyRepository;
     }
@@ -132,15 +142,18 @@ public class JobService {
      * @param jobId     job id
      * @param jobName   job name
      */
-    void checkJobName(String projectId, String jobId, String jobName) {
+    void checkJobName(String projectId, String jobId, @Nullable String jobName) {
+        if (jobName == null) {
+            throw new BadRequestException("Job's name isn't defined");
+        }
         List<ConfigMap> configMapsByLabels =
-            kubernetesService.getConfigMapsByLabels(projectId, Map.of(Constants.NAME, jobName));
+                kubernetesService.getConfigMapsByLabels(projectId, Map.of(NAME, jobName));
 
         if (configMapsByLabels.size() > 1 ||
-            (configMapsByLabels.size() == 1 && !configMapsByLabels.get(0).getMetadata().getName().equals(jobId))) {
+                (configMapsByLabels.size() == 1 && !configMapsByLabels.get(0).getMetadata().getName().equals(jobId))) {
             throw new BadRequestException(String.format("Job with name '%s' already exist in project %s",
-                                                        jobName,
-                                                        projectId));
+                    jobName,
+                    projectId));
         }
     }
 
@@ -151,18 +164,28 @@ public class JobService {
      * @param jobRequestDto job request dto
      * @return id of job
      */
-    public String create(final String projectId, @Valid final JobRequestDto jobRequestDto) {
+    public String create(final String projectId, @Valid JobDto jobRequestDto) {
         String jobName = jobRequestDto.getName();
         checkJobName(projectId, null, jobName);
 
-        ConfigMap jobMainCm = jobRequestDto.toConfigMap(UUID.randomUUID().toString(), jobConfigFullPath);
-        String jobId = createFromConfigMap(projectId, jobMainCm, true);
+        jobRequestDto.setDefinition(JobUtils.parseJobDefinition(jobRequestDto.getDefinition()));
+        String jobId = UUID.randomUUID().toString();
+        ConfigMap jobMainCm = K8sUtils.toConfigMap(jobId, jobRequestDto, jobConfigFullPath);
 
-        ConfigMap jobDataCm = jobRequestDto.toJobDataConfigMap(jobId);
+        ProjectResponseDto projectDto = projectService.get(projectId);
+        Map<String, List<DataSource>> sourcesToShow = null;
+        if (projectDto.getDemoLimits() != null) {
+            sourcesToShow = projectDto.getDemoLimits().getSourcesToShow();
+        }
+        ConfigMap jobDataCm = toJobDataConfigMap(jobId, jobRequestDto, sourcesToShow);
+        ConfigMap jobDefCm = toJobDefConfigMap(jobRequestDto, jobId);
+
+        createFromConfigMap(projectId, jobMainCm, true);
         createFromConfigMap(projectId, jobDataCm, true);
+        createFromConfigMap(projectId, jobDefCm, true);
 
         projectService.checkConnectionDependencies(projectId, jobId, null,
-                DependencyHandlerService.getDefinition(jobMainCm));
+                DependencyHandlerService.getJobDefinition(projectId, jobDefCm, kubernetesService));
         return jobId;
     }
 
@@ -197,46 +220,87 @@ public class JobService {
      * @param projectId     project id
      * @param jobRequestDto job request dto
      */
-    public void update(final String id, final String projectId, @Valid final JobRequestDto jobRequestDto) {
-        String jobName = jobRequestDto.getName();
-        checkJobName(projectId, id, jobName);
-
-        ConfigMap oldConfigMap = kubernetesService.getConfigMap(projectId, id);
-        ConfigMap newConfigMap = new ConfigMapBuilder(jobRequestDto.toConfigMap(id, jobConfigFullPath))
-                .addToData(Constants.DEPENDENT_PIPELINE_IDS,
-                        oldConfigMap.getData().get(Constants.DEPENDENT_PIPELINE_IDS))
-                .build();
-        kubernetesService.createOrReplaceConfigMap(projectId, newConfigMap);
-
-        ConfigMap newConfigDataMap = jobRequestDto.toJobDataConfigMap(id);
-        kubernetesService.createOrReplaceConfigMap(projectId, newConfigDataMap);
-
-        projectService.checkConnectionDependencies(projectId, id,
-                DependencyHandlerService.getDefinition(oldConfigMap),
-                DependencyHandlerService.getDefinition(newConfigMap));
+    public void update(final String id, final String projectId, @Valid JobDto jobRequestDto) {
+        updateConfigMaps(id, projectId, jobRequestDto);
         try {
             kubernetesService.deletePod(projectId, id);
             kubernetesService.deletePodsByLabels(projectId, Map.of(Constants.JOB_ID_LABEL,
-                                                                   id,
-                                                                   Constants.SPARK_ROLE_LABEL,
-                                                                   Constants.SPARK_ROLE_EXEC,
-                                                                   Constants.PIPELINE_JOB_ID_LABEL,
-                                                                   Constants.NOT_PIPELINE_FLAG));
+                    id,
+                    Constants.SPARK_ROLE_LABEL,
+                    Constants.SPARK_ROLE_EXEC,
+                    Constants.PIPELINE_JOB_ID_LABEL,
+                    Constants.NOT_PIPELINE_FLAG));
         } catch (ResourceNotFoundException e) {
             LOGGER.error(KubernetesService.NO_POD_MESSAGE, e);
             return;
         }
 
-        List<String> foundParams = ProjectService.findParamsKeysInString(jobRequestDto.getDefinition().toString());
-        List<ParamDto> existingParams = projectService.getParams(projectId).getParams();
-        for(ParamDto param : existingParams) {
-            if(foundParams.contains(param.getKey())) {
-                param.getValue().getJobUsages().add(id);
-            } else {
-                param.getValue().getJobUsages().remove(id);
+        updateParams(id, projectId, jobRequestDto.getDefinition());
+    }
+
+    void updateConfigMaps(String id, String projectId, JobDto jobRequestDto) {
+        String jobName = jobRequestDto.getName();
+        checkJobName(projectId, id, jobName);
+
+        jobRequestDto.setDefinition(JobUtils.parseJobDefinition(jobRequestDto.getDefinition()));
+
+        ConfigMap oldConfigMap = kubernetesService.getConfigMap(projectId, id);
+        ConfigMap newConfigMap = new ConfigMapBuilder(K8sUtils.toConfigMap(id, jobRequestDto, jobConfigFullPath))
+                .addToData(Constants.DEPENDENT_PIPELINE_IDS,
+                        oldConfigMap.getData().get(Constants.DEPENDENT_PIPELINE_IDS))
+                .build();
+
+        ProjectResponseDto projectDto = projectService.get(projectId);
+        Map<String, List<DataSource>> sourcesToShow = null;
+        if (projectDto.getDemoLimits() != null) {
+            sourcesToShow = projectDto.getDemoLimits().getSourcesToShow();
+        }
+        ConfigMap newConfigDataMap = toJobDataConfigMap(id, jobRequestDto, sourcesToShow);
+        ConfigMap newConfigDefMap = toJobDefConfigMap(jobRequestDto, id);
+
+        kubernetesService.createOrReplaceConfigMap(projectId, newConfigMap);
+        kubernetesService.createOrReplaceConfigMap(projectId, newConfigDataMap);
+        kubernetesService.createOrReplaceConfigMap(projectId, newConfigDefMap);
+
+        projectService.checkConnectionDependencies(projectId, id,
+                DependencyHandlerService.getJobDefinition(projectId, oldConfigMap, kubernetesService),
+                DependencyHandlerService.getJobDefinition(projectId, newConfigMap, kubernetesService));
+    }
+
+    /**
+     * Update connection details for all jobs from connection.
+     *
+     * @param connectDto connectDto
+     * @param projectId  project id
+     */
+    public void updateConnectionDetails(final @Valid ConnectDto connectDto, final String projectId) {
+        Optional<JsonNode> optJobIdsNode = Optional.ofNullable(connectDto.getValue().get(Constants.DEPENDENT_JOB_IDS));
+        if (optJobIdsNode.isPresent()) {
+            for (JsonNode nodeJobId : optJobIdsNode.get()) {
+                String jobId = nodeJobId.textValue();
+
+                try {
+                    JobDto jobDto = getById(projectId, jobId);
+
+                    JsonNode jobDefinition = appendConnectionDetails(jobDto.getDefinition(), connectDto);
+                    JobDto reCreatedJobDto = JobDto.builder()
+                            .name(jobDto.getName())
+                            .params(jobDto.getParams())
+                            .definition(JobUtils.parseJobDefinition(jobDefinition))
+                            .build();
+
+                    update(jobId, projectId, reCreatedJobDto);
+                } catch (ResourceNotFoundException resourceNotFoundException) {
+                    LOGGER.info(
+                            "Job '{}' doesn't exist in project '{}'. " +
+                                    "But exist in connection '{}' as dependency: {}",
+                            jobId,
+                            projectId,
+                            connectDto.getKey(),
+                            resourceNotFoundException.getLocalizedMessage());
+                }
             }
         }
-        projectService.updateParamsWithoutProcessing(projectId, existingParams);
     }
 
     /**
@@ -255,15 +319,15 @@ public class JobService {
             ObjectMeta metadata = configMap.getMetadata();
             String jobId = metadata.getName();
 
-            JobOverviewDto.JobOverviewDtoBuilder jobBuilder = JobOverviewDto.fromConfigMap(configMap);
+            JobOverviewDto.JobOverviewDtoBuilder jobBuilder = JobUtils.convertConfigMapToJobOverview(configMap);
 
             try {
                 PodStatus podStatus = kubernetesService.getPodStatus(projectId, jobId);
                 jobBuilder
-                    .startedAt(DateTimeUtils.getFormattedDateTime(podStatus.getStartTime()))
-                    .status(podStatus.getPhase())
-                    .finishedAt(DateTimeUtils.getFormattedDateTime(K8sUtils
-                            .extractTerminatedStateField(podStatus, ContainerStateTerminated::getFinishedAt)));
+                        .startedAt(DateTimeUtils.getFormattedDateTime(podStatus.getStartTime()))
+                        .status(podStatus.getPhase())
+                        .finishedAt(DateTimeUtils.getFormattedDateTime(K8sUtils
+                                .extractTerminatedStateField(podStatus, ContainerStateTerminated::getFinishedAt)));
 
                 jobBuilder.usage(getJobUsage(projectId, jobId, null));
             } catch (ResourceNotFoundException e) {
@@ -274,8 +338,8 @@ public class JobService {
 
             List<PipelineJobOverviewDto> pipelineJobOverviewDtos = new ArrayList<>(workflowPods.size());
             for (Pod workflowPod : workflowPods) {
-                PipelineJobOverviewDto pipelineJobOverviewDto = PipelineJobOverviewDto
-                        .fromPod(workflowPod)
+                PipelineJobOverviewDto pipelineJobOverviewDto = JobUtils
+                        .convertPodToJob(workflowPod)
                         .usage(getJobUsage(projectId, jobId, workflowPod.getMetadata().getName()))
                         .build();
                 pipelineJobOverviewDtos.add(pipelineJobOverviewDto);
@@ -290,7 +354,25 @@ public class JobService {
 
         JobOverviewListDto.JobOverviewListDtoBuilder builder = JobOverviewListDto.builder().jobs(jobs);
         appendEditable(projectId, builder::editable);
-        return builder.build();
+        return JobUtils.withPipelineJobs(builder.build());
+    }
+
+    private static JsonNode appendConnectionDetails(JsonNode nodeJobDefinition, ConnectDto connectDto) {
+        for (JsonNode values : nodeJobDefinition.get(Constants.GRAPH_LABEL)) {
+            Optional<JsonNode> optConnectionId = Optional.ofNullable(values.get(Constants.VALUE_LABEL)
+                            .get(Constants.CONNECTION_ID_LABEL))
+                    .filter((JsonNode connectionId) -> connectionId.textValue()
+                            .equals(connectDto.getKey()));
+            if (optConnectionId.isPresent()) {
+                ObjectNode nodeValue = (ObjectNode) values.get(Constants.VALUE_LABEL);
+                nodeValue.put(Constants.CONNECTION_ID_LABEL, connectDto.getKey());
+
+                connectDto.getValue().fieldNames().forEachRemaining((String field) ->
+                        nodeValue.set(field, connectDto.getValue().get(field))
+                );
+            }
+        }
+        return nodeJobDefinition;
     }
 
     private void appendEditable(String projectId, Consumer<Boolean> consumer) {
@@ -327,19 +409,19 @@ public class JobService {
 
     private ResourceUsageDto getJobUsage(final String projectId, final String jobId, final String pipelineJobId) {
         Map<String, String> labels = new HashMap<>(Map.of(Constants.JOB_ID_LABEL,
-                                                          jobId,
-                                                          Constants.SPARK_ROLE_LABEL,
-                                                          Constants.SPARK_ROLE_EXEC));
+                jobId,
+                Constants.SPARK_ROLE_LABEL,
+                Constants.SPARK_ROLE_EXEC));
         labels.put(Constants.PIPELINE_JOB_ID_LABEL,
-                   Objects.requireNonNullElse(pipelineJobId, Constants.NOT_PIPELINE_FLAG));
+                Objects.requireNonNullElse(pipelineJobId, Constants.NOT_PIPELINE_FLAG));
 
         try {
             List<String> executors = kubernetesService
-                .getPodsByLabels(projectId, labels)
-                .stream()
-                .map(Pod::getMetadata)
-                .map(ObjectMeta::getName)
-                .collect(Collectors.toList());
+                    .getPodsByLabels(projectId, labels)
+                    .stream()
+                    .map(Pod::getMetadata)
+                    .map(ObjectMeta::getName)
+                    .collect(Collectors.toList());
 
             List<PodMetrics> podMetrics = new ArrayList<>(executors.size() + 1);
 
@@ -350,9 +432,9 @@ public class JobService {
             podMetrics.add(kubernetesService.topPod(projectId, jobId));
 
             return ResourceUsageDto
-                .usageFromMetricsAndQuota(podMetrics,
-                                          kubernetesService.getResourceQuota(projectId, Constants.QUOTA_NAME))
-                .build();
+                    .usageFromMetricsAndQuota(podMetrics,
+                            kubernetesService.getResourceQuota(projectId, Constants.QUOTA_NAME))
+                    .build();
         } catch (KubernetesClientException e) {
             if (!e.getStatus().getCode().equals(HttpStatus.NOT_FOUND.value())) {
                 throw e;
@@ -362,27 +444,25 @@ public class JobService {
         }
     }
 
-    /**
-     * Getting job by id.
-     *
-     * @param projectId project id
-     * @param id        job id
-     * @return job graph
-     */
-    public JobResponseDto get(final String projectId, final String id) {
-        ConfigMap configMap = kubernetesService.getConfigMap(projectId, id);
+    private JobDto get(String projectId, ConfigMap configMap) {
+        String id = configMap.getMetadata().getName();
         boolean accessibleToRun = kubernetesService.isAccessible(projectId, "pods", "", Constants.CREATE_ACTION);
 
-        JobResponseDto.JobResponseDtoBuilder jobResponseDtoBuilder =
-            JobResponseDto.fromConfigMap(configMap).status(K8sUtils.DRAFT_STATUS);
+        JobDto.JobDtoBuilder jobResponseDtoBuilder =
+                JobUtils.convertConfigMapToJobResponse(configMap).status(K8sUtils.DRAFT_STATUS);
+
+        jobResponseDtoBuilder.definition(DependencyHandlerService
+                .getJobDefinition(projectId, configMap, kubernetesService));
 
         try {
-            PodStatus status = kubernetesService.getPodStatus(projectId, id);
+            Pod pod = kubernetesService.getPod(projectId, id);
+            PodStatus status = pod.getStatus();
             jobResponseDtoBuilder
-                .status(status.getPhase())
-                .startedAt(DateTimeUtils.getFormattedDateTime(status.getStartTime()))
-                .finishedAt(DateTimeUtils.getFormattedDateTime(K8sUtils
-                        .extractTerminatedStateField(status, ContainerStateTerminated::getFinishedAt)));
+                    .runId(pod.getMetadata().getUid())
+                    .status(status.getPhase())
+                    .startedAt(DateTimeUtils.getFormattedDateTime(status.getStartTime()))
+                    .finishedAt(DateTimeUtils.getFormattedDateTime(K8sUtils
+                            .extractTerminatedStateField(status, ContainerStateTerminated::getFinishedAt)));
         } catch (ResourceNotFoundException e) {
             LOGGER.warn("Job {} has not started yet: {}", id, e.getLocalizedMessage());
         }
@@ -391,6 +471,41 @@ public class JobService {
         appendEditable(projectId, jobResponseDtoBuilder::editable);
 
         return jobResponseDtoBuilder.build();
+    }
+
+    /**
+     * Getting job by id.
+     *
+     * @param projectId project id
+     * @param id        job id
+     * @return job graph
+     */
+    public JobDto getById(String projectId, String id) {
+        return get(projectId, kubernetesService.getConfigMap(projectId, id));
+    }
+
+    /**
+     * Getting job's ID by name.
+     *
+     * @param projectId project id
+     * @param name        job name
+     * @return job graph
+     */
+    public String getIdByName(String projectId, String name) {
+        return Optional.ofNullable(kubernetesService.getConfigMapByLabel(projectId, NAME, name))
+                .map(cm -> cm.getMetadata().getName())
+                .orElse(null);
+    }
+
+    /**
+     * Method to check, if job exists.
+     *
+     * @param projectId is project ID;
+     * @param id        is job's ID;
+     * @return true, if this job exists.
+     */
+    public boolean checkIfJobExists(String projectId, String id) {
+        return kubernetesService.isConfigMapReadable(projectId, id);
     }
 
     /**
@@ -405,8 +520,9 @@ public class JobService {
             throw new BadRequestException("The job is still being used by the pipeline");
         }
         projectService.checkConnectionDependencies(projectId, id,
-                DependencyHandlerService.getDefinition(configMap), null);
+                DependencyHandlerService.getJobDefinition(projectId, configMap, kubernetesService), null);
 
+        kubernetesService.deleteConfigMap(projectId, id + Constants.JOB_DEF_SUFFIX);
         kubernetesService.deleteConfigMap(projectId, id + Constants.JOB_CONFIG_SUFFIX);
         kubernetesService.deleteConfigMap(projectId, id);
         kubernetesService.deletePodsByLabels(projectId, Map.of(Constants.JOB_ID_LABEL, id));
@@ -419,10 +535,13 @@ public class JobService {
     /**
      * Configuration and running job.
      *
-     * @param projectId project id
-     * @param jobId     job id
+     * @param projectId   project id
+     * @param jobId       job id
+     * @param interactive interactive mode
+     * @return Pod uuid
      */
-    public void run(final String projectId, final String jobId) {
+    public String run(final String projectId, final String jobId, boolean interactive) {
+        JobDto jobDto = getById(projectId, jobId);
         ConfigMap configMap = kubernetesService.getConfigMap(projectId, jobId);
         try {
             kubernetesService.getConfigMap(projectId, configMap.getMetadata().getName() +
@@ -432,28 +551,33 @@ public class JobService {
                     "Config map for '{}' Job Config is missing: {}. Converting old-format configmap to new-format...",
                     configMap.getMetadata().getName(),
                     e.getLocalizedMessage());
-            JobResponseDto jobResponseDto = get(projectId, jobId);
-            JobRequestDto reCreatedJobDto = JobRequestDto.builder()
-                    .name(jobResponseDto.getName())
-                    .params(jobResponseDto.getParams())
-                    .definition(jobResponseDto.getDefinition())
+            JobDto reCreatedJobDto = JobDto.builder()
+                    .name(jobDto.getName())
+                    .params(jobDto.getParams())
+                    .definition(jobDto.getDefinition())
                     .build();
             update(jobId, projectId, reCreatedJobDto);
         }
-        Pod pod = initializePod(projectId, jobId, configMap);
+        PodBuilder podBuilder = initializePod(projectId, jobId, configMap, interactive);
+        projectService.createOrUpdateSystemSecret(projectId);
         try {
             kubernetesService.deletePod(projectId, jobId);
             kubernetesService.deletePodsByLabels(projectId, Map.of(Constants.JOB_ID_LABEL,
-                                                                   jobId,
-                                                                   Constants.SPARK_ROLE_LABEL,
-                                                                   Constants.SPARK_ROLE_EXEC,
-                                                                   Constants.PIPELINE_JOB_ID_LABEL,
-                                                                   Constants.NOT_PIPELINE_FLAG));
+                    jobId,
+                    Constants.SPARK_ROLE_LABEL,
+                    Constants.SPARK_ROLE_EXEC,
+                    Constants.PIPELINE_JOB_ID_LABEL,
+                    Constants.NOT_PIPELINE_FLAG));
         } catch (ResourceNotFoundException e) {
-            LOGGER.error(KubernetesService.NO_POD_MESSAGE, e);
+            LOGGER.warn(KubernetesService.NO_POD_MESSAGE, e);
         }
         podService.trackPodEvents(projectId, jobId);
-        kubernetesService.createPod(projectId, pod);
+        Pod created = kubernetesService.createPod(projectId, podBuilder);
+        String uid = created.getMetadata().getUid();
+        if (interactive) {
+            jobSessionService.createSession(uid, jobDto.getDefinition());
+        }
+        return uid;
     }
 
     /**
@@ -464,6 +588,7 @@ public class JobService {
      */
     public void stop(final String projectId, final String id) {
         PodStatus podStatus = kubernetesService.getPodStatus(projectId, id);
+        LOGGER.info("{} POD status is {}", id, podStatus.getPhase());
         if ("Running".equals(podStatus.getPhase())) {
             kubernetesService.stopPod(projectId, id);
         } else if ("Pending".equals(podStatus.getPhase())) {
@@ -484,41 +609,42 @@ public class JobService {
         Map<String, JobHistory> histories = historyRepository.findAll(projectId + "_" + id);
 
         return histories
-            .entrySet()
-            .stream()
-            .map(jobHistory -> HistoryResponseDto
-                .builder()
-                .id(jobHistory.getValue().getId())
-                .type(jobHistory.getValue().getType())
-                .status(jobHistory.getValue().getStatus())
-                .startedAt(jobHistory.getValue().getStartedAt())
-                .finishedAt(jobHistory.getValue().getFinishedAt())
-                .startedBy(jobHistory.getValue().getStartedBy())
-                .logId(jobHistory.getKey())
-                .build()
-            )
-            .collect(Collectors.toList());
+                .entrySet()
+                .stream()
+                .map(jobHistory -> HistoryResponseDto
+                        .builder()
+                        .id(jobHistory.getValue().getId())
+                        .type(jobHistory.getValue().getType())
+                        .status(jobHistory.getValue().getStatus())
+                        .startedAt(jobHistory.getValue().getStartedAt())
+                        .finishedAt(jobHistory.getValue().getFinishedAt())
+                        .startedBy(jobHistory.getValue().getStartedBy())
+                        .logId(jobHistory.getKey())
+                        .build()
+                )
+                .collect(Collectors.toList());
     }
 
     /**
      * Initialize pod
      *
-     * @param projectId  project id
-     * @param jobId      job id
-     * @param configMap  config map
+     * @param projectId project id
+     * @param jobId     job id
+     * @param configMap config map
      * @return pod
      */
-    private Pod initializePod(String projectId, String jobId, ConfigMap configMap) {
+    private PodBuilder initializePod(String projectId, String jobId, ConfigMap configMap, boolean interactive) {
+        String userName = authenticationService.getUserInfo().map(UserInfo::getUsername).orElseThrow();
         return new PodBuilder()
                 .withNewMetadata()
                 .withName(jobId)
                 .withNamespace(projectId)
                 .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
                 .addToLabels(Constants.JOB_ID_LABEL, jobId)
-                .addToLabels(Constants.STARTED_BY, authenticationService.getUserInfo().getUsername())
+                .addToLabels(Constants.STARTED_BY, userName)
                 .endMetadata()
                 .withNewSpec()
-                .withServiceAccountName(serviceAccount)
+                .withServiceAccountName(appProperties.getJob().getSpark().getServiceAccount())
                 .withNewSecurityContext()
                 .withRunAsGroup(K8sUtils.GROUP_ID)
                 .withRunAsUser(K8sUtils.USER_ID)
@@ -526,27 +652,7 @@ public class JobService {
                 .endSecurityContext()
                 .addNewContainer()
                 .withName(K8sUtils.JOB_CONTAINER)
-                .withEnv(new EnvVarBuilder()
-                                .withName("POD_IP")
-                                .withNewValueFrom()
-                                .editOrNewFieldRef()
-                                .withApiVersion("v1")
-                                .withFieldPath("status.podIP")
-                                .endFieldRef()
-                                .endValueFrom()
-                                .build(),
-                        new EnvVarBuilder().withName("IMAGE_PULL_SECRETS").withValue(imagePullSecret).build(),
-                        new EnvVarBuilder().withName("JOB_MASTER").withValue(jobMaster).build(),
-                        new EnvVarBuilder().withName("POD_NAME").withValue(jobId).build(),
-                        new EnvVarBuilder().withName("PVC_NAME").withValue(K8sUtils.PVC_NAME).build(),
-                        new EnvVarBuilder().withName("MOUNT_PATH").withValue(pvcMountPath).build(),
-                        new EnvVarBuilder().withName("JOB_ID").withValue(jobId).build(),
-                        new EnvVarBuilder()
-                                .withName("PIPELINE_JOB_ID")
-                                .withValue(Constants.NOT_PIPELINE_FLAG)
-                                .build(),
-                        new EnvVarBuilder().withName("JOB_IMAGE").withValue(jobImage).build(),
-                        new EnvVarBuilder().withName("POD_NAMESPACE").withValue(projectId).build())
+                .withEnv(createEnvVars(jobId, interactive))
                 .withEnvFrom(new EnvFromSourceBuilder()
                                 .withNewConfigMapRef()
                                 .withName(jobId)
@@ -554,20 +660,25 @@ public class JobService {
                                 .build(),
                         new EnvFromSourceBuilder()
                                 .withNewSecretRef()
-                                .withName(ParamsDto.SECRET_NAME)
+                                .withName(ParamUtils.SECRET_NAME)
+                                .endSecretRef()
+                                .build(),
+                        new EnvFromSourceBuilder()
+                                .withNewSecretRef()
+                                .withName(SYSTEM_SECRET)
                                 .endSecretRef()
                                 .build())
                 .withResources(K8sUtils.getResourceRequirements(configMap.getData()))
                 .withCommand("/opt/spark/work-dir/entrypoint.sh")
-                .withImage(jobImage)
+                .withImage(appProperties.getJob().getSpark().getImage())
                 .withImagePullPolicy("Always")
                 .addNewVolumeMount()
                 .withName("spark-pvc-volume")
-                .withMountPath(pvcMountPath)
+                .withMountPath(appProperties.getPvc().getMountPath())
                 .endVolumeMount()
                 .addNewVolumeMount()
                 .withName("job-config-data")
-                .withMountPath(jobConfigMountPath)
+                .withMountPath(appProperties.getJob().getConfig().getMountPath())
                 .endVolumeMount()
                 .endContainer()
                 .addNewVolume()
@@ -586,10 +697,58 @@ public class JobService {
                         .build())
                 .endConfigMap()
                 .endVolume()
-                .addNewImagePullSecret(imagePullSecret)
+                .addNewImagePullSecret(appProperties.getJob().getImagePullSecret())
                 .withRestartPolicy("Never")
-                .endSpec()
-                .build();
+                .endSpec();
+    }
+
+    @NotNull
+    private List<EnvVar> createEnvVars(String jobId, boolean interactive) {
+        ImmutableList.Builder<EnvVar> envVars = ImmutableList.<EnvVar>builder().add(
+                new EnvVarBuilder().withName("POD_UID")
+                        .withNewValueFrom()
+                        .withNewFieldRef()
+                        .withFieldPath("metadata.uid")
+                        .endFieldRef()
+                        .endValueFrom()
+                        .build(),
+                new EnvVarBuilder()
+                        .withName("POD_IP")
+                        .withNewValueFrom()
+                        .editOrNewFieldRef()
+                        .withApiVersion("v1")
+                        .withFieldPath("status.podIP")
+                        .endFieldRef()
+                        .endValueFrom()
+                        .build(),
+                new EnvVarBuilder().withName("IMAGE_PULL_SECRETS").withValue(
+                        appProperties.getJob().getImagePullSecret()
+                ).build(),
+                new EnvVarBuilder().withName("JOB_MASTER").withValue(
+                        appProperties.getJob().getSpark().getMaster()
+                ).build(),
+                new EnvVarBuilder().withName("POD_NAME").withValue(jobId).build(),
+                new EnvVarBuilder().withName("PVC_NAME").withValue(K8sUtils.PVC_NAME).build(),
+                new EnvVarBuilder().withName("MOUNT_PATH").withValue(
+                        appProperties.getPvc().getMountPath()
+                ).build(),
+                new EnvVarBuilder().withName("BACKEND_HOST").withValue(appProperties.getServer().getHost()
+                        + appProperties.getServer().getServlet().getContextPath()).build(),
+                new EnvVarBuilder().withName("JOB_ID").withValue(jobId).build(),
+                new EnvVarBuilder()
+                        .withName("PIPELINE_JOB_ID")
+                        .withValue(NOT_PIPELINE_FLAG)
+                        .build(),
+                new EnvVarBuilder().withName("JOB_IMAGE").withValue(
+                        appProperties.getJob().getSpark().getImage()
+                ).build()
+        );
+        if (interactive) {
+            envVars.add(
+                    new EnvVarBuilder().withName(VISUAL_FLOW_RUNTIME_MODE).withValue(INTERACTIVE).build()
+            );
+        }
+        return envVars.build();
     }
 
     /**
@@ -602,8 +761,8 @@ public class JobService {
         List<ParamDto> allParams = projectService.getParams(projectId).getParams();
         allParams.forEach(param -> param.getValue().getJobUsages().clear());
         List<JobOverviewDto> allJobs = getAll(projectId).getJobs();
-        for(JobOverviewDto jobOverviewDto: allJobs) {
-            JobResponseDto jobDto = get(projectId, jobOverviewDto.getId());
+        for (JobOverviewDto jobOverviewDto : allJobs) {
+            JobDto jobDto = getById(projectId, jobOverviewDto.getId());
             List<String> foundParams = ProjectService.findParamsKeysInString(jobDto.getDefinition().toString());
             if (!foundParams.isEmpty()) {
                 allParams
@@ -614,5 +773,154 @@ public class JobService {
         }
         projectService.updateParamsWithoutProcessing(projectId, allParams);
         return true;
+    }
+
+    /**
+     * Creating job data cm.
+     *
+     * @param jobId jobId
+     * @return new job data cm
+     */
+    public ConfigMap toJobDataConfigMap(String jobId, @Valid JobDto jobDto,
+                                        Map<String, List<DataSource>> sourcesForDemo) {
+        GraphDto graphDto = GraphUtils.parseGraph(jobDto.getDefinition());
+        validatorService.validateGraph(graphDto, sourcesForDemo);
+
+        return new ConfigMapBuilder()
+                .addToData(K8sUtils.createConfigMapData(graphDto))
+                .withNewMetadata()
+                .withName(jobId + Constants.JOB_CONFIG_SUFFIX)
+                .addToLabels(Constants.PARENT, jobDto.getName())
+                .addToLabels(Constants.TYPE, Constants.TYPE_JOB_CONFIG)
+                .addToAnnotations(Constants.LAST_MODIFIED, ZonedDateTime.now().format(Constants.DATE_TIME_FORMATTER))
+                .endMetadata()
+                .build();
+    }
+
+    /**
+     * Creating job definition cm.
+     *
+     * @param jobId jobId
+     * @return new job def cm
+     */
+    public ConfigMap toJobDefConfigMap(@Valid JobDto jobDto, String jobId) {
+        return new ConfigMapBuilder()
+                .addToData(Map.of(Constants.DEFINITION,
+                        Base64.encodeBase64String(jobDto.getDefinition().toString().getBytes(StandardCharsets.UTF_8))))
+                .withNewMetadata()
+                .withName(jobId + Constants.JOB_DEF_SUFFIX)
+                .addToLabels(Constants.PARENT, jobDto.getName())
+                .addToLabels(Constants.TYPE, Constants.TYPE_JOB_DEF)
+                .addToAnnotations(Constants.LAST_MODIFIED, ZonedDateTime.now().format(Constants.DATE_TIME_FORMATTER))
+                .endMetadata()
+                .build();
+    }
+
+    /**
+     * Copies job.
+     *
+     * @param projectId project id
+     * @param jobId     job id
+     */
+    public void copy(final String projectId, final String jobId) {
+        ConfigMap configMap = argoKubernetesService.getConfigMap(projectId, jobId);
+        K8sUtils.copyEntity(projectId,
+                configMap,
+                (String projId, ConfigMap confMap) -> {
+                    String jobPrevData = confMap.getData().get(JOB_CONFIG_FIELD);
+                    String jobPrevDef = confMap.getMetadata().getAnnotations().get(DEFINITION);
+                    confMap.getData().remove(JOB_CONFIG_FIELD);
+                    confMap.getData().remove(DEPENDENT_PIPELINE_IDS);
+                    confMap.getMetadata().getAnnotations().remove(DEFINITION);
+                    confMap.getData().putIfAbsent(JOB_CONFIG_PATH_FIELD, jobConfigFullPath);
+                    String newJobId = createFromConfigMap(projId, confMap, false);
+
+                    ConfigMap jobDefCm = new ConfigMapBuilder()
+                            .addToData(extractJobData(projId,
+                                    jobId.concat(JOB_DEF_SUFFIX),
+                                    DEFINITION,
+                                    jobPrevDef))
+                            .withNewMetadata()
+                            .addToLabels(PARENT, confMap.getMetadata().getLabels().get(NAME))
+                            .withName(newJobId + JOB_DEF_SUFFIX)
+                            .addToLabels(TYPE, TYPE_JOB_DEF)
+                            .addToAnnotations(LAST_MODIFIED,
+                                    ZonedDateTime.now().format(DATE_TIME_FORMATTER))
+                            .endMetadata()
+                            .build();
+                    createFromConfigMap(projId, jobDefCm, false);
+
+                    ConfigMap jobDataCm = new ConfigMapBuilder()
+                            .addToData(extractJobData(projId,
+                                    jobId.concat(JOB_CONFIG_SUFFIX),
+                                    JOB_CONFIG_FIELD,
+                                    jobPrevData))
+                            .withNewMetadata()
+                            .addToLabels(PARENT, confMap.getMetadata().getLabels().get(NAME))
+                            .withName(newJobId + JOB_CONFIG_SUFFIX)
+                            .addToLabels(TYPE, TYPE_JOB_CONFIG)
+                            .addToAnnotations(LAST_MODIFIED,
+                                    ZonedDateTime.now().format(DATE_TIME_FORMATTER))
+                            .endMetadata()
+                            .build();
+                    createFromConfigMap(projId, jobDataCm, false);
+
+                    projectService.checkConnectionDependencies(projId, confMap.getMetadata().getName(),
+                            null, DependencyHandlerService.getJobDefinition(projId, confMap,
+                                    argoKubernetesService));
+                },
+                argoKubernetesService.getAllConfigMaps(projectId));
+    }
+
+    private Map<String, String> extractJobData(String projectId, String confName,
+                                               String dataField, String putIfNotExists) {
+        Map<String, String> jobData = new HashMap<>();
+        try {
+            ConfigMap dataMap = argoKubernetesService.getConfigMap(projectId, confName);
+            jobData = dataMap.getData();
+        } catch (ResourceNotFoundException e) {
+            LOGGER.warn("Job configmap {} has not been found: {}. Try to find param in the parent configmap.",
+                    confName,
+                    e.getLocalizedMessage());
+            jobData.put(dataField, putIfNotExists);
+        }
+        return jobData;
+    }
+
+    void updateParams(String id, String projectId, JsonNode definition) {
+
+        JsonNode jsonNode = JobUtils.parseJobDefinition(definition);
+
+        List<String> foundParams = ProjectService.findParamsKeysInString(jsonNode.toString());
+        List<ParamDto> existingParams = projectService.getParams(projectId).getParams();
+        for (ParamDto param : existingParams) {
+            if (foundParams.contains(param.getKey())) {
+                param.getValue().getJobUsages().add(id);
+            } else {
+                param.getValue().getJobUsages().remove(id);
+            }
+        }
+        projectService.updateParamsWithoutProcessing(projectId, existingParams);
+    }
+
+    public void updateDefinition(String jobId, String projectId, JsonNode source) {
+        JobDto jobDto = getById(projectId, jobId);
+        JsonNode definition = jobDto.getDefinition();
+        ArrayNode graph = definition.withArray("graph");
+        ArrayNode nodes = source.withArray("nodes");
+        Map<String, JsonNode> valuesById = GraphUtils.groupNodes(nodes);
+        for (JsonNode node : graph) {
+            JsonNode isVertex = node.get("vertex");
+            if (isVertex != null && isVertex.asBoolean()) {
+                String id = node.get("id").asText();
+                JsonNode value = valuesById.get(id);
+                if (value != null) {
+                    ((ObjectNode) node).set("value", value);
+                }
+            }
+        }
+        jobDto.setDefinition(definition);
+        updateConfigMaps(jobId, projectId, jobDto);
+        updateParams(jobId, projectId, definition);
     }
 }

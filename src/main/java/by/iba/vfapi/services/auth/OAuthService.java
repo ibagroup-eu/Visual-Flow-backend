@@ -19,11 +19,12 @@
 
 package by.iba.vfapi.services.auth;
 
+import by.iba.vfapi.config.ApplicationConfigurationProperties;
 import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.model.auth.UserInfoBuilder;
 import com.fasterxml.jackson.databind.JsonNode;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -36,30 +37,18 @@ import org.springframework.web.client.RestTemplate;
 
 /**
  * OAuthService class.
+ * Mainly used for getting user info.
  */
 @Slf4j
+@RequiredArgsConstructor
 @Service
 public class OAuthService {
 
     private final RestTemplate restTemplate;
 
-    private final String userInfoUrl;
+    private final ApplicationConfigurationProperties appProperties;
 
     private final Environment env;
-
-    /**
-     * Constructor for class OAuthService.
-     *
-     * @param restTemplate RestTemplate
-     * @param userInfoUrl  url for getting user info by OAuth.
-     * @param environment  env
-     */
-    public OAuthService(
-        RestTemplate restTemplate, @Value("${oauth.url.userInfo}") String userInfoUrl, Environment environment) {
-        this.restTemplate = restTemplate;
-        this.userInfoUrl = userInfoUrl;
-        this.env = environment;
-    }
 
     /**
      * Gets user info from AppId by auth-token.
@@ -76,7 +65,7 @@ public class OAuthService {
             HttpEntity<Object> applicationRequest = new HttpEntity<>(headers);
             return UserInfoBuilder.buildWithEnv(env,
                                                 restTemplate
-                                                    .exchange(userInfoUrl,
+                                                    .exchange(appProperties.getOauth().getUrl().getUserInfo(),
                                                               HttpMethod.GET,
                                                               applicationRequest,
                                                               JsonNode.class)

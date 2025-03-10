@@ -20,9 +20,9 @@
 package by.iba.vfapi.config.security;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -30,6 +30,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.task.DelegatingSecurityContextAsyncTaskExecutor;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -45,7 +46,9 @@ import java.util.Collections;
 @EnableWebSecurity
 @EnableGlobalMethodSecurity(securedEnabled = true)
 public class WebSecurityConfig {
-    private static final String API_PATH = "/api/**";
+    public static final String API_PATH = "/api/**";
+    public static final String PUBLIC_API_PATH = "/public/api/**";
+
     private static final int CORE_POOL_SIZE = 10;
     private static final int MAX_POOL_SIZE = 100;
     private static final int QUEUE_CAPACITY = 50;
@@ -66,18 +69,26 @@ public class WebSecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-            .csrf()
-            .disable()
-            .cors()
-            .and()
-            .sessionManagement()
-            .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
-            .and()
-            .addFilterBefore(jwtAuthenticationFilter, BasicAuthenticationFilter.class)
-            .antMatcher(API_PATH)
-            .requiresChannel()
-            .anyRequest()
-            .requiresSecure();
+                .csrf()
+                .disable()
+                .cors()
+                .and()
+                .sessionManagement()
+                .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                .and()
+                .addFilterBefore(jwtAuthenticationFilter, BasicAuthenticationFilter.class)
+                .authorizeHttpRequests(customizer -> customizer
+                        .antMatchers(PUBLIC_API_PATH).permitAll()
+                        .antMatchers(API_PATH).authenticated()
+                        .anyRequest().permitAll())
+
+                .exceptionHandling(customizer -> customizer.authenticationEntryPoint(
+                        new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
+                )
+                .requiresChannel()
+                .anyRequest()
+                .requiresSecure();
+
 
         return http.build();
     }
@@ -96,19 +107,6 @@ public class WebSecurityConfig {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration(API_PATH, configuration);
         return source;
-    }
-
-    /**
-     * JwtAuthentication filter.
-     *
-     * @return Filter registration bean for Jwt authentication filter
-     */
-    @Bean
-    public FilterRegistrationBean<JWTAuthenticationFilter> jwtAuthenticationFilter() {
-        FilterRegistrationBean<JWTAuthenticationFilter> registrationBean = new FilterRegistrationBean<>();
-        registrationBean.setFilter(jwtAuthenticationFilter);
-        registrationBean.addUrlPatterns(API_PATH);
-        return registrationBean;
     }
 
     /**

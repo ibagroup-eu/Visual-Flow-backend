@@ -19,7 +19,7 @@
 
 package by.iba.vfapi.config;
 
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
 
@@ -33,28 +33,29 @@ public class MailSenderConfig extends JavaMailSenderImpl {
 
     // Note that this constructor has the following sonar error: java:S107.
     // This error has been added to the ignore list due to the current inability to solve this problem.
-    public MailSenderConfig(
-            @Value("${notifications.mail.username}") final String username,
-            @Value("${notifications.mail.password}") final String password,
-            @Value("${notifications.mail.protocol}") final String protocol,
-            @Value("${notifications.mail.host}") final String host,
-            @Value("${notifications.mail.port}") final int port,
-            @Value("${notifications.mail.properties.mail.smtp.starttls}") final String starttls,
-            @Value("${notifications.mail.properties.mail.smtp.auth}") final String auth,
-            @Value("${notifications.mail.test-connection}") final String test,
-            @Value("${notifications.mail.default-encoding}") final String encoding
-    ){
-        super.setHost(host);
-        super.setPort(port);
-        super.setUsername(username);
-        super.setPassword(password);
-        super.setDefaultEncoding(encoding);
+    @Autowired
+    public MailSenderConfig(ApplicationConfigurationProperties appProperties) {
+        super.setHost(appProperties.getNotifications().getMail().getHost());
+        super.setPort(appProperties.getNotifications().getMail().getPort());
+        super.setUsername(appProperties.getNotifications().getMail().getUsername());
+        super.setPassword(appProperties.getNotifications().getMail().getPassword());
+        super.setDefaultEncoding(appProperties.getNotifications().getMail().getDefaultEncoding());
+        addProperties(appProperties);
+    }
+
+    /**
+     * Method for putting new properties in default email properties.
+     * @param appProperties application properties in yaml.
+     */
+    private void addProperties(ApplicationConfigurationProperties appProperties) {
         Properties properties = super.getJavaMailProperties();
-        properties.put("mail.transport.protocol", protocol);
-        properties.put("mail.smtp.auth", auth);
-        properties.put("mail.smtp.starttls.enable", starttls);
-        properties.put("mail.test-connection", test);
-        super.setJavaMailProperties(properties);
+        properties.put("mail.transport.protocol", appProperties.getNotifications().getMail().getProtocol());
+        properties.put("mail.smtp.auth",
+                appProperties.getNotifications().getMail().getProperties().getMail().getSmtp().isAuth());
+        properties.put("mail.smtp.starttls.enable",
+                appProperties.getNotifications().getMail().getProperties().getMail().getSmtp().isStarttls());
+        properties.put("mail.test-connection", appProperties.getNotifications().getMail().isTestConnection());
+        setJavaMailProperties(properties);
     }
 
 }

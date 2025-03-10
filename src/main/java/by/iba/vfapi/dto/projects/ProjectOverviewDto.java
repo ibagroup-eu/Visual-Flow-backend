@@ -20,8 +20,6 @@
 package by.iba.vfapi.dto.projects;
 
 import by.iba.vfapi.config.OpenApiConfig;
-import by.iba.vfapi.dto.Constants;
-import io.fabric8.kubernetes.api.model.Namespace;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -31,6 +29,8 @@ import lombok.ToString;
 
 /**
  * Project overview DTO class.
+ * Contains basic information about the project, such as name, ID, and description.
+ * It does not contain detailed information, as in {@link ProjectResponseDto}.
  */
 @Getter
 @Setter
@@ -47,20 +47,4 @@ public class ProjectOverviewDto {
     private String description;
     @Schema(ref = OpenApiConfig.SCHEMA_PROJECT_LOCK_STATUS)
     private boolean isLocked;
-
-    /**
-     * Converts Namespace to Project DTO.
-     *
-     * @param namespace namespace to convert.
-     * @return project dto builder.
-     */
-    public static ProjectOverviewDto fromNamespace(Namespace namespace, boolean isLocked) {
-        return ProjectOverviewDto
-            .builder()
-            .name(namespace.getMetadata().getAnnotations().get(Constants.NAME_FIELD))
-            .description(namespace.getMetadata().getAnnotations().get(Constants.DESCRIPTION_FIELD))
-            .id(namespace.getMetadata().getName())
-            .isLocked(isLocked)
-            .build();
-    }
 }

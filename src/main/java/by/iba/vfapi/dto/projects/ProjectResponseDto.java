@@ -20,18 +20,23 @@
 package by.iba.vfapi.dto.projects;
 
 import by.iba.vfapi.config.OpenApiConfig;
-import by.iba.vfapi.dto.Constants;
-import io.fabric8.kubernetes.api.model.Namespace;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
+import lombok.extern.slf4j.Slf4j;
+
+import javax.validation.Valid;
 
 /**
  * Project response DTO class.
+ * Contains namespace information from Kubernetes.
+ * Determines, wherever a project is for demo and
+ * add limitations depending on demo flag.
  */
+@Slf4j
 @Getter
 @Setter
 @EqualsAndHashCode
@@ -39,6 +44,8 @@ import lombok.ToString;
 @ToString
 @Schema(description = "DTO with information about the project")
 public class ProjectResponseDto {
+    private static final int JOBS_LIMIT = 3;
+    private static final int PIPELINES_LIMIT = 2;
     @Schema(ref = OpenApiConfig.SCHEMA_PROJECT_NAME)
     private String name;
     @Schema(ref = OpenApiConfig.SCHEMA_PROJECT_ID)
@@ -47,20 +54,11 @@ public class ProjectResponseDto {
     private String description;
     private ResourceQuotaResponseDto limits;
     private ResourceQuotaResponseDto usage;
+    @Valid
+    private DemoLimitsDto demoLimits;
     @Schema(description = "Whether namespace/project is editable")
     private boolean editable;
-
-    /**
-     * Converts Namespace to Project DTO.
-     *
-     * @param namespace namespace to convert.
-     * @return project dto builder.
-     */
-    public static ProjectResponseDto.ProjectResponseDtoBuilder fromNamespace(Namespace namespace) {
-        return ProjectResponseDto
-            .builder()
-            .name(namespace.getMetadata().getAnnotations().get(Constants.NAME_FIELD))
-            .description(namespace.getMetadata().getAnnotations().get(Constants.DESCRIPTION_FIELD))
-            .id(namespace.getMetadata().getName());
-    }
+    @Schema(description = "Determines if this project is DEMO (has limits for projects, pipelines, etc.)")
+    private boolean demo;
+    private boolean locked;
 }

@@ -20,23 +20,15 @@
 package by.iba.vfapi.dto.jobs;
 
 import by.iba.vfapi.config.OpenApiConfig;
-import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.dto.ResourceUsageDto;
-import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.swagger.v3.oas.annotations.media.Schema;
-import java.util.Collections;
-import java.util.Map;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
 
-import static by.iba.vfapi.services.DependencyHandlerService.checkIfJobDependsExist;
+import java.util.List;
+import java.util.Set;
 
 /**
  * job overview DTO class.
@@ -61,59 +53,10 @@ public class JobOverviewDto {
     private final String lastModified;
     private final ResourceUsageDto usage;
     private final List<PipelineJobOverviewDto> pipelineInstances;
-    //TODO remove field pipelineId
+    //TODO delete field pipelineId
     private final String pipelineId;
     @Schema(description = "Whether current user can run the job and whether the job has some stages in it")
     private final boolean runnable;
     private final List<String> tags;
     private final Set<String> dependentPipelineIds;
-
-    public static JobOverviewDto.JobOverviewDtoBuilder fromConfigMap(ConfigMap configMap) {
-        return JobOverviewDto
-            .builder()
-            .id(configMap.getMetadata().getName())
-            .name(configMap.getMetadata().getLabels().get(Constants.NAME))
-            .tags(checkIfTagsExist(configMap.getData()))
-            .dependentPipelineIds(checkIfJobDependsExist(configMap.getData()))
-            .lastModified(configMap.getMetadata().getAnnotations().get(Constants.LAST_MODIFIED));
-    }
-
-    public static JobOverviewListDto withPipelineJobs(JobOverviewListDto jobOverviewDtos) {
-        List<JobOverviewDto> jobs = new ArrayList<>();
-        for (JobOverviewDto job : jobOverviewDtos.getJobs()) {
-            jobs.add(job);
-            jobs.addAll(job
-                            .getPipelineInstances()
-                            .stream()
-                            .map(pipelineJob -> JobOverviewDto
-                                .builder()
-                                .id(pipelineJob.getId())
-                                .name(job.getName())
-                                .startedAt(pipelineJob.getStartedAt())
-                                .finishedAt(pipelineJob.getFinishedAt())
-                                .status(pipelineJob.getStatus())
-                                .lastModified(job.getLastModified())
-                                .pipelineId(pipelineJob.getPipelineId())
-                                .usage(pipelineJob.getUsage())
-                                .tags(job.getTags())
-                                .dependentPipelineIds(job.getDependentPipelineIds())
-                                .build())
-                            .collect(Collectors.toList()));
-        }
-
-        return JobOverviewListDto.builder().jobs(jobs).editable(jobOverviewDtos.isEditable()).build();
-    }
-
-    /**
-     * Getting tags if they exist in config map.
-     *
-     * @param data config map data
-     * @return List of tags or empty
-     */
-    public static List<String> checkIfTagsExist(Map<String, String> data) {
-        if (data.get(Constants.TAGS) != null && !data.get(Constants.TAGS).isEmpty()) {
-            return Arrays.asList(data.get(Constants.TAGS).split(","));
-        }
-        return Collections.emptyList();
-    }
 }

@@ -19,17 +19,20 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.common.LoadFilePodBuilderService;
+import by.iba.vfapi.config.ApplicationConfigurationProperties;
 import by.iba.vfapi.dao.LogRepositoryImpl;
 import by.iba.vfapi.dao.PipelineHistoryRepository;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.model.argo.CronWorkflow;
 import by.iba.vfapi.model.argo.Workflow;
 import by.iba.vfapi.model.argo.WorkflowList;
+import by.iba.vfapi.model.argo.WorkflowStatus;
 import by.iba.vfapi.model.argo.WorkflowTemplate;
 import by.iba.vfapi.model.argo.WorkflowTemplateList;
-import by.iba.vfapi.model.argo.WorkflowStatus;
 import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.services.auth.AuthenticationService;
+import by.iba.vfapi.services.utils.K8sUtils;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.api.model.WatchEvent;
 import io.fabric8.kubernetes.api.model.apiextensions.v1beta1.CustomResourceDefinition;
@@ -37,40 +40,43 @@ import io.fabric8.kubernetes.api.model.apiextensions.v1beta1.CustomResourceDefin
 import io.fabric8.kubernetes.api.model.apiextensions.v1beta1.CustomResourceDefinitionNamesBuilder;
 import io.fabric8.kubernetes.api.model.apiextensions.v1beta1.CustomResourceDefinitionSpecBuilder;
 import io.fabric8.kubernetes.client.server.mock.KubernetesServer;
-import java.net.HttpURLConnection;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
+import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.context.junit.jupiter.SpringExtension;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import java.net.HttpURLConnection;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, SpringExtension.class})
+@ContextConfiguration(initializers = ConfigDataApplicationContextInitializer.class)
+@EnableConfigurationProperties(value = ApplicationConfigurationProperties.class)
 class ArgoKubernetesServiceTest {
-    private static final String APP_NAME = "vf";
-    private static final String APP_NAME_LABEL = "testApp";
-    private static final String PVC_MOUNT_PATH = "/files";
-    private static final String IMAGE_PULL_SECRET = "vf-dev-image-pull";
     private static final Long EVENT_WAIT_PERIOD_MS = 10L;
-
     private final KubernetesServer server = new KubernetesServer();
-
     @Mock
     private AuthenticationService authenticationServiceMock;
     @Mock
     private LogRepositoryImpl logRepository;
-
     private ArgoKubernetesService argoKubernetesService;
+    @Autowired
+    private ApplicationConfigurationProperties appProperties;
+    @Mock
+    private LoadFilePodBuilderService filePodService;
 
 
     @BeforeEach
@@ -137,13 +143,11 @@ class ArgoKubernetesServiceTest {
             .andReturn(HttpURLConnection.HTTP_OK, cronWfCrd)
             .once();
         argoKubernetesService = new ArgoKubernetesService(
+            appProperties,
             server.getClient(),
-            APP_NAME,
-            APP_NAME_LABEL,
-            PVC_MOUNT_PATH,
-            IMAGE_PULL_SECRET,
             authenticationServiceMock,
-            logRepository
+            logRepository,
+            filePodService
         );
     }
 
@@ -155,7 +159,7 @@ class ArgoKubernetesServiceTest {
     private void mockAuthenticationService() {
         UserInfo ui = new UserInfo();
         ui.setSuperuser(true);
-        when(authenticationServiceMock.getUserInfo()).thenReturn(ui);
+        when(authenticationServiceMock.getUserInfo()).thenReturn(Optional.of(ui));
     }
 
     @Test

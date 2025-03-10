@@ -19,28 +19,34 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.config.ApplicationConfigurationProperties;
 import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.dto.exporting.ExportRequestDto;
 import by.iba.vfapi.dto.exporting.ExportResponseDto;
-import by.iba.vfapi.dto.importing.EntityDto;
 import by.iba.vfapi.dto.importing.ImportResponseDto;
-import by.iba.vfapi.dto.projects.ParamDto;
-import by.iba.vfapi.dto.projects.ParamDataDto;
-import by.iba.vfapi.dto.projects.ParamsDto;
+import by.iba.vfapi.dto.importing.MissingParamDto;
+import by.iba.vfapi.dto.jobs.JobDto;
+import by.iba.vfapi.dto.pipelines.PipelineDto;
 import by.iba.vfapi.dto.projects.ConnectDto;
 import by.iba.vfapi.dto.projects.ConnectionsDto;
+import by.iba.vfapi.dto.projects.ParamDataDto;
+import by.iba.vfapi.dto.projects.ParamDto;
+import by.iba.vfapi.dto.projects.ParamsDto;
 import by.iba.vfapi.exceptions.BadRequestException;
-import by.iba.vfapi.model.argo.*;
-import by.iba.vfapi.model.notifications.EmailNotification;
-import by.iba.vfapi.model.notifications.SlackNotification;
+import by.iba.vfapi.model.JobParams;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.fabric8.kubernetes.api.model.ConfigMap;
-import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
-import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
-import io.fabric8.kubernetes.client.CustomResource;
-import java.nio.charset.StandardCharsets;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
+import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.context.junit.jupiter.SpringExtension;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -49,94 +55,93 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import lombok.SneakyThrows;
-import org.apache.commons.codec.binary.Base64;
-import org.apache.commons.lang3.SerializationUtils;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, SpringExtension.class})
+@ContextConfiguration(initializers = ConfigDataApplicationContextInitializer.class)
+@EnableConfigurationProperties(value = ApplicationConfigurationProperties.class)
 class TransferServiceTest {
     private static JsonNode GRAPH_WITH_PARAM;
     private static JsonNode GRAPH_WITHOUT_PARAM;
+    private static JsonNode GRAPH_WITH_ONE_JOB;
 
     static {
         try {
             GRAPH_WITH_PARAM = new ObjectMapper().readTree("{\n" +
-                                                               "  \"graph\": [\n" +
-                                                               "    {\n" +
-                                                               "      \"value\": {\n" +
-                                                               "        \"jobId\": \"cm1\",\n" +
-                                                               "        \"name\": \"#testJob#\",\n" +
-                                                               "        \"operation\": \"JOB\"\n" +
-                                                               "      },\n" +
-                                                               "      \"id\": \"jRjFu5yR\",\n" +
-                                                               "      \"vertex\": true\n" +
-                                                               "    },\n" +
-                                                               "    {\n" +
-                                                               "      \"value\": {\n" +
-                                                               "        \"jobId\": \"cm2\",\n" +
-                                                               "        \"name\": \"testJob2\",\n" +
-                                                               "        \"operation\": \"JOB\"\n" +
-                                                               "      },\n" +
-                                                               "      \"id\": \"cyVyU8Xfw\",\n" +
-                                                               "      \"vertex\": true\n" +
-                                                               "    },\n" +
-                                                               "    {\n" +
-                                                               "      \"value\": {\n" +
-                                                               "        \"successPath\": true,\n" +
-                                                               "        \"operation\": \"EDGE\"\n" +
-                                                               "      },\n" +
-                                                               "      \"source\": \"jRjFu5yR\",\n" +
-                                                               "      \"target\": \"cyVyU8Xfw\"\n" +
-                                                               "    }\n" +
-                                                               "  ]\n" +
-                                                               "}");
+                    "  \"graph\": [\n" +
+                    "    {\n" +
+                    "      \"value\": {\n" +
+                    "        \"jobId\": \"cm1\",\n" +
+                    "        \"name\": \"#testJob#\",\n" +
+                    "        \"operation\": \"JOB\"\n" +
+                    "      },\n" +
+                    "      \"id\": \"jRjFu5yR\",\n" +
+                    "      \"vertex\": true\n" +
+                    "    },\n" +
+                    "    {\n" +
+                    "      \"value\": {\n" +
+                    "        \"jobId\": \"cm2\",\n" +
+                    "        \"name\": \"testJob2\",\n" +
+                    "        \"operation\": \"JOB\"\n" +
+                    "      },\n" +
+                    "      \"id\": \"cyVyU8Xfw\",\n" +
+                    "      \"vertex\": true\n" +
+                    "    },\n" +
+                    "    {\n" +
+                    "      \"value\": {\n" +
+                    "        \"successPath\": true,\n" +
+                    "        \"operation\": \"EDGE\"\n" +
+                    "      },\n" +
+                    "      \"source\": \"jRjFu5yR\",\n" +
+                    "      \"target\": \"cyVyU8Xfw\"\n" +
+                    "    }\n" +
+                    "  ]\n" +
+                    "}");
 
             GRAPH_WITHOUT_PARAM = new ObjectMapper().readTree("{\n" +
-                                                                  "  \"graph\": [\n" +
-                                                                  "    {\n" +
-                                                                  "      \"value\": {\n" +
-                                                                  "        \"jobId\": \"cm1\",\n" +
-                                                                  "        \"name\": \"testJob\",\n" +
-                                                                  "        \"operation\": \"JOB\"\n" +
-                                                                  "      },\n" +
-                                                                  "      \"id\": \"jRjFu5yR\",\n" +
-                                                                  "      \"vertex\": true\n" +
-                                                                  "    },\n" +
-                                                                  "    {\n" +
-                                                                  "      \"value\": {\n" +
-                                                                  "        \"jobId\": \"cm2\",\n" +
-                                                                  "        \"name\": \"testJob2\",\n" +
-                                                                  "        \"operation\": \"JOB\"\n" +
-                                                                  "      },\n" +
-                                                                  "      \"id\": \"cyVyU8Xfw\",\n" +
-                                                                  "      \"vertex\": true\n" +
-                                                                  "    },\n" +
-                                                                  "    {\n" +
-                                                                  "      \"value\": {\n" +
-                                                                  "        \"successPath\": true,\n" +
-                                                                  "        \"operation\": \"EDGE\"\n" +
-                                                                  "      },\n" +
-                                                                  "      \"source\": \"jRjFu5yR\",\n" +
-                                                                  "      \"target\": \"cyVyU8Xfw\"\n" +
-                                                                  "    }\n" +
-                                                                  "  ]\n" +
-                                                                  "}");
+                    "  \"graph\": [\n" +
+                    "    {\n" +
+                    "      \"value\": {\n" +
+                    "        \"jobId\": \"cm1\",\n" +
+                    "        \"name\": \"testJob\",\n" +
+                    "        \"operation\": \"JOB\"\n" +
+                    "      },\n" +
+                    "      \"id\": \"jRjFu5yR\",\n" +
+                    "      \"vertex\": true\n" +
+                    "    },\n" +
+                    "    {\n" +
+                    "      \"value\": {\n" +
+                    "        \"jobId\": \"cm2\",\n" +
+                    "        \"name\": \"testJob2\",\n" +
+                    "        \"operation\": \"JOB\"\n" +
+                    "      },\n" +
+                    "      \"id\": \"cyVyU8Xfw\",\n" +
+                    "      \"vertex\": true\n" +
+                    "    },\n" +
+                    "    {\n" +
+                    "      \"value\": {\n" +
+                    "        \"successPath\": true,\n" +
+                    "        \"operation\": \"EDGE\"\n" +
+                    "      },\n" +
+                    "      \"source\": \"jRjFu5yR\",\n" +
+                    "      \"target\": \"cyVyU8Xfw\"\n" +
+                    "    }\n" +
+                    "  ]\n" +
+                    "}");
+            GRAPH_WITH_ONE_JOB = new ObjectMapper().readTree("{\"graph\": [\n" +
+                    "      {\n" +
+                    "        \"value\": {\n" +
+                    "          \"operation\": \"JOB\",\n" +
+                    "          \"name\": \"read\",\n" +
+                    "          \"jobId\": \"jobFromPipeline\",\n" +
+                    "          \"jobName\": \"name1\"\n" +
+                    "        },\n" +
+                    "        \"vertex\": true\n" +
+                    "      }\n" +
+                    "    ]}");
         } catch (JsonProcessingException e) {
             e.printStackTrace();
         }
@@ -150,225 +155,147 @@ class TransferServiceTest {
     private PipelineService pipelineService;
     @Mock
     private ProjectService projectService;
-    @Mock
-    private DependencyHandlerService dependencyHandlerService;
     private TransferService transferService;
+
     @BeforeEach
     void setUp() {
         transferService = new TransferService(argoKubernetesService,
-                jobService, pipelineService, projectService, "test");
+                jobService, pipelineService, projectService, null);
+        transferService.setSelf(transferService);
     }
 
     @Test
-    void testExporting() {
-        WorkflowTemplate workflowTemplate = new WorkflowTemplate();
-        workflowTemplate.setMetadata(new ObjectMetaBuilder()
-                                         .withName("pipelineId")
-                                         .addToLabels(Constants.NAME, "name")
-                                         .addToLabels(Constants.TYPE, "pipeline")
-                                         .addToAnnotations(Constants.DEFINITION,
-                                                           Base64.encodeBase64String("GRAPH".getBytes()))
-                                         .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
-                                         .build());
-        workflowTemplate.setSpec(new WorkflowTemplateSpec().templates(List.of(new Template()
-                                                                                  .name("dagTemplate")
-                                                                                  .dag(new DagTemplate().addTasksItem(
-                                                                                      new DagTask().arguments(new Arguments()
-                                                                                                                  .addParametersItem(
-                                                                                                                      new Parameter()
-                                                                                                                          .name(
-                                                                                                                              K8sUtils.CONFIGMAP)
-                                                                                                                          .value(
-                                                                                                                              "jobFromPipeline"))))))));
+    void testExporting() throws JsonProcessingException {
+        PipelineDto workflowTemplate = PipelineDto.builder()
+                .id("pipelineId")
+                .name("name")
+                .definition(GRAPH_WITH_ONE_JOB)
+                .lastModified("lastModified")
+                .build();
+        when(pipelineService.getById("projectId", "pipelineId")).thenReturn(workflowTemplate);
 
+        JobDto configMap1 = JobDto.builder()
+                .id("jobFromPipeline")
+                .name("name1")
+                .definition(new ObjectMapper().readTree("{\"graph\":[]}"))
+                .lastModified("lastModified")
+                .params(JobParams.builder()
+                        .executorMemory("1G")
+                        .driverMemory("1G")
+                        .build())
+                .build();
 
-        when(argoKubernetesService.getWorkflowTemplate("projectId", "pipelineId")).thenReturn(workflowTemplate);
-
-        ConfigMap configMap1 = new ConfigMapBuilder()
-            .addToData(Map.of(Constants.EXECUTOR_MEMORY,
-                              "1G",
-                              Constants.DRIVER_MEMORY,
-                              "1G",
-                              Constants.JOB_CONFIG_FIELD,
-                              "{\"nodes\":[], \"edges\":[]}"))
-            .withNewMetadata()
-            .withName("jobFromPipeline")
-            .addToLabels(Constants.NAME, "name1")
-            .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-            .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String("GRAPH".getBytes()))
-            .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
-            .endMetadata()
-            .build();
-
-        ConfigMap configMap2 = new ConfigMapBuilder()
-            .addToData(Map.of(Constants.EXECUTOR_MEMORY,
-                              "1G",
-                              Constants.DRIVER_MEMORY,
-                              "1G",
-                              Constants.JOB_CONFIG_FIELD,
-                              "{\"nodes\":[], \"edges\":[]}"))
-            .withNewMetadata()
-            .withName("jobId1")
-            .addToLabels(Constants.NAME, "name1")
-            .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-            .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String("GRAPH".getBytes()))
-            .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
-            .endMetadata()
-            .build();
-        when(argoKubernetesService.getConfigMap("projectId", "jobId1")).thenReturn(configMap2);
-        when(argoKubernetesService.getConfigMap("projectId", "jobFromPipeline")).thenReturn(configMap1);
+        JobDto configMap2 = JobDto.builder()
+                .id("jobId1")
+                .name("name1")
+                .definition(new ObjectMapper().readTree("{\"graph\":[]}"))
+                .lastModified("lastModified")
+                .params(JobParams.builder()
+                        .executorMemory("1G")
+                        .driverMemory("1G")
+                        .build())
+                .build();
+        when(jobService.getById("projectId", "jobId1")).thenReturn(configMap2);
+        when(jobService.getById("projectId", "jobFromPipeline")).thenReturn(configMap1);
 
         ExportResponseDto exporting = transferService.exporting("projectId",
-                                                                Set.of("jobId1"),
-                                                                Set.of(new ExportRequestDto.PipelineRequest(
-                                                                    "pipelineId",
-                                                                    true)));
+                Set.of("jobId1"),
+                Set.of(new ExportRequestDto.PipelineRequest(
+                        "pipelineId",
+                        true)));
 
         ExportResponseDto expected = ExportResponseDto
-            .builder()
-            .jobs(Set.of(configMap1, configMap2))
-            .pipelines(Set.of(workflowTemplate))
-            .build();
+                .builder()
+                .jobs(Set.of(configMap1, configMap2))
+                .pipelines(Set.of(workflowTemplate))
+                .build();
 
         assertEquals(expected.getJobs(), exporting.getJobs());
-        assertEquals(expected.getPipelines().stream().map(CustomResource::getSpec).collect(Collectors.toList()),
-                     exporting.getPipelines().stream().map(CustomResource::getSpec).collect(Collectors.toList()));
+        assertEquals(expected.getPipelines().stream().map(PipelineDto::getDefinition).collect(Collectors.toList()),
+                exporting.getPipelines().stream().map(PipelineDto::getDefinition).collect(Collectors.toList()),
+                "Only one pipeline should be exported.");
     }
 
     @Test
     void testImporting() {
-        ConfigMap configMap1 = new ConfigMapBuilder()
-            .addToData(Map.of(Constants.EXECUTOR_MEMORY,
-                              "1G",
-                              Constants.DRIVER_MEMORY,
-                              "1G",
-                              Constants.JOB_CONFIG_FIELD,
-                              "{\"nodes\":[], \"edges\":[]}"))
-            .withNewMetadata()
-            .withName("jobId1")
-            .addToLabels(Constants.NAME, "jobName1")
-            .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-            .addToAnnotations(Constants.DEFINITION,
-                              Base64.encodeBase64String(GRAPH_WITH_PARAM
-                                                            .toString()
-                                                            .getBytes(StandardCharsets.UTF_8)))
-            .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
-            .endMetadata()
-            .build();
+        JobDto configMap1 = JobDto.builder()
+                .id("jobId1")
+                .name("jobName1")
+                .definition(GRAPH_WITH_PARAM)
+                .lastModified("lastModified")
+                .params(JobParams.builder()
+                        .executorMemory("1G")
+                        .driverMemory("1G")
+                        .build())
+                .build();
 
-        ConfigMap configMap2 = new ConfigMapBuilder()
-            .addToData(Map.of(Constants.EXECUTOR_MEMORY,
-                              "1G",
-                              Constants.DRIVER_MEMORY,
-                              "1G",
-                              Constants.JOB_CONFIG_FIELD,
-                              "{\"nodes\":[], \"edges\":[]}"))
-            .withNewMetadata()
-            .withName("jobId2")
-            .addToLabels(Constants.NAME, "jobName2")
-            .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-            .addToAnnotations(Constants.DEFINITION,
-                              Base64.encodeBase64String(GRAPH_WITHOUT_PARAM
-                                                            .toString()
-                                                            .getBytes(StandardCharsets.UTF_8)))
-            .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
-            .endMetadata()
-            .build();
+        JobDto configMap2 = JobDto.builder()
+                .id("jobId2")
+                .name("jobName2")
+                .definition(GRAPH_WITHOUT_PARAM)
+                .lastModified("lastModified")
+                .params(JobParams.builder()
+                        .executorMemory("1G")
+                        .driverMemory("1G")
+                        .build())
+                .build();
 
-        ConfigMap configMap3 = new ConfigMapBuilder()
-            .addToData(Map.of(Constants.EXECUTOR_MEMORY,
-                              "1G",
-                              Constants.DRIVER_MEMORY,
-                              "1G",
-                              Constants.JOB_CONFIG_FIELD,
-                              "{\"nodes\":[], \"edges\":[]}"))
-            .withNewMetadata()
-            .withName("jobId3")
-            .addToLabels(Constants.NAME, "jobName3")
-            .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-            .addToAnnotations(Constants.DEFINITION,
-                              Base64.encodeBase64String(GRAPH_WITHOUT_PARAM
-                                                            .toString()
-                                                            .getBytes(StandardCharsets.UTF_8)))
-            .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
-            .endMetadata()
-            .build();
+        JobDto configMap3 = JobDto.builder()
+                .id("jobId3")
+                .name("jobName3")
+                .definition(GRAPH_WITHOUT_PARAM)
+                .lastModified("lastModified")
+                .params(JobParams.builder()
+                        .executorMemory("1G")
+                        .driverMemory("1G")
+                        .build())
+                .build();
 
-        WorkflowTemplate workflowTemplate1 = new WorkflowTemplate();
-        workflowTemplate1.setMetadata(new ObjectMetaBuilder()
-                                          .withName("pipelineId1")
-                                          .addToLabels(Constants.NAME, "pipelineName1")
-                                          .addToAnnotations(Constants.DEFINITION,
-                                                            Base64.encodeBase64String(GRAPH_WITHOUT_PARAM
-                                                                                          .toString()
-                                                                                          .getBytes(
-                                                                                              StandardCharsets.UTF_8)))
-                                          .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
-                                          .build());
-        workflowTemplate1.setSpec(new WorkflowTemplateSpec().templates(List.of(new Template()
-                                                                                   .name("dagTemplate")
-                                                                                   .dag(new DagTemplate().addTasksItem(
-                                                                                       new DagTask())))));
-        WorkflowTemplate workflowTemplate2 = new WorkflowTemplate();
-        workflowTemplate2.setMetadata(new ObjectMetaBuilder()
-                                          .withName("pipelineId2")
-                                          .addToLabels(Constants.NAME, "pipelineName2")
-                                          .addToAnnotations(Constants.DEFINITION,
-                                                            Base64.encodeBase64String(GRAPH_WITH_PARAM
-                                                                                          .toString()
-                                                                                          .getBytes(
-                                                                                              StandardCharsets.UTF_8)))
-                                          .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
-                                          .build());
-        workflowTemplate2.setSpec(new WorkflowTemplateSpec().templates(List.of(new Template()
-                                                                                   .name("dagTemplate")
-                                                                                   .dag(new DagTemplate().addTasksItem(
-                                                                                       new DagTask())))));
-        WorkflowTemplate workflowTemplate3 = new WorkflowTemplate();
-        workflowTemplate3.setMetadata(new ObjectMetaBuilder()
-                                          .withName("pipelineId3")
-                                          .addToLabels(Constants.NAME, "pipelineName3")
-                                          .addToAnnotations(Constants.DEFINITION,
-                                                            Base64.encodeBase64String(GRAPH_WITHOUT_PARAM
-                                                                                          .toString()
-                                                                                          .getBytes(
-                                                                                              StandardCharsets.UTF_8)))
-                                          .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
-                                          .build());
-        workflowTemplate3.setSpec(new WorkflowTemplateSpec().templates(List.of(new Template()
-                                                                                   .name("dagTemplate")
-                                                                                   .dag(new DagTemplate().addTasksItem(
-                                                                                       new DagTask())))));
+        PipelineDto workflowTemplate1 = PipelineDto.builder()
+                .id("pipelineId1")
+                .name("pipelineName1")
+                .definition(GRAPH_WITHOUT_PARAM)
+                .lastModified("lastModified")
+                .build();
 
-        doNothing().when(jobService).checkJobName("projectId", "jobId1", "jobName1");
-        doThrow(BadRequestException.class).when(jobService).checkJobName("projectId", "jobId2", "jobName2");
-        doNothing().when(jobService).checkJobName("projectId", "jobId3", "jobName3");
+        PipelineDto workflowTemplate2 = PipelineDto.builder()
+                .id("pipelineId2")
+                .name("pipelineName2")
+                .definition(GRAPH_WITH_PARAM)
+                .lastModified("lastModified")
+                .build();
+
+        PipelineDto workflowTemplate3 = PipelineDto.builder()
+                .id("pipelineId3")
+                .name("pipelineName3")
+                .definition(GRAPH_WITHOUT_PARAM)
+                .lastModified("lastModified")
+                .build();
+
+        when(jobService.create("projectId", configMap1)).thenReturn(null);
+        doThrow(BadRequestException.class).when(jobService).create("projectId", configMap2);
+        when(jobService.create("projectId", configMap3)).thenReturn(null);
 
 
-        doNothing().when(pipelineService).checkPipelineName("projectId", "pipelineId1", "pipelineName1");
+        when(pipelineService.create(eq("projectId"), eq("pipelineName1"), any(JsonNode.class),
+                eq(workflowTemplate1.getParams()))).thenReturn(null);
         doThrow(BadRequestException.class)
-            .when(pipelineService)
-            .checkPipelineName("projectId", "pipelineId2", "pipelineName2");
-        doNothing().when(pipelineService).checkPipelineName("projectId", "pipelineId3", "pipelineName3");
-
-        doNothing().when(argoKubernetesService).createOrReplaceConfigMap(eq("projectId"), any(ConfigMap.class));
-        when(pipelineService.createWorkflowTemplate(eq("projectId"), anyString(), anyString(), any(), any()))
-                .thenReturn(new WorkflowTemplate());
-        doNothing()
-            .when(argoKubernetesService)
-            .createOrReplaceWorkflowTemplate(eq("projectId"), any(WorkflowTemplate.class));
+                .when(pipelineService)
+                .create(eq("projectId"), eq("pipelineName2"), any(JsonNode.class), eq(workflowTemplate2.getParams()));
+        when(pipelineService.create(eq("projectId"), eq("pipelineName3"), any(JsonNode.class),
+                eq(workflowTemplate3.getParams()))).thenReturn(null);
 
         List<ParamDto> paramDtos =
-            Arrays.asList(ParamDto.builder()
-                            .key("someKey")
-                            .value(ParamDataDto.builder().text("someValue").build())
-                            .secret(false)
-                            .build(),
-                          ParamDto.builder()
-                                  .key("someKey1")
-                                  .value(ParamDataDto.builder().text("someValue2").build())
-                                  .secret(false)
-                                  .build());
+                Arrays.asList(ParamDto.builder()
+                                .key("someKey")
+                                .value(ParamDataDto.builder().text("someValue").build())
+                                .secret(false)
+                                .build(),
+                        ParamDto.builder()
+                                .key("someKey1")
+                                .value(ParamDataDto.builder().text("someValue2").build())
+                                .secret(false)
+                                .build());
         ParamsDto paramsDto = ParamsDto.builder().editable(true).params(paramDtos).build();
         when(projectService.getParams(anyString())).thenReturn(paramsDto);
 
@@ -385,24 +312,28 @@ class TransferServiceTest {
         when(projectService.getConnections(anyString())).thenReturn(connectionsDto);
 
         ImportResponseDto importing = transferService.importing("projectId",
-                Set.of(configMap1, configMap2, configMap3),
-                Set.of(workflowTemplate1,
+                List.of(configMap1, configMap2, configMap3),
+                List.of(workflowTemplate1,
                         workflowTemplate2,
                         workflowTemplate3));
 
-        Map<String, List<EntityDto>> expectedParams = new HashMap<>();
-        Map<String, List<EntityDto>> expectedConnections = new HashMap<>();
+        Map<String, List<MissingParamDto>> expectedParams = new HashMap<>();
+        Map<String, List<MissingParamDto>> expectedConnections = new HashMap<>();
         expectedParams.put("testJob",
-                Arrays.asList(EntityDto.builder().id("jobId1").kind("Job").nodeId("jRjFu5yR").build()));
+                Arrays.asList(MissingParamDto.builder().name("jobName1").kind("Job").nodeId("jRjFu5yR").build()));
         expectedConnections.put("testJob",
-                Arrays.asList(EntityDto.builder().id("jobId1").kind("Job").nodeId("jRjFu5yR").build()));
+                Arrays.asList(MissingParamDto.builder().name("jobName1").kind("Job").nodeId("jRjFu5yR").build()));
+        List<String> errorMessages = new ArrayList<>();
+        errorMessages.add(null);
         ImportResponseDto expected = ImportResponseDto
-            .builder()
-            .notImportedPipelines(List.of("pipelineId2"))
-            .notImportedJobs(List.of("jobId2"))
-            .missingProjectParams(expectedParams)
-            .missingProjectConnections(expectedConnections)
-            .build();
+                .builder()
+                .notImportedPipelines(List.of("pipelineName2"))
+                .notImportedJobs(List.of("jobName2"))
+                .errorsInJobs(Map.of("jobName2", errorMessages))
+                .errorsInPipelines(Map.of("pipelineName2", errorMessages))
+                .missingProjectParams(expectedParams)
+                .missingProjectConnections(expectedConnections)
+                .build();
 
         assertEquals(expected, importing);
     }
@@ -411,259 +342,8 @@ class TransferServiceTest {
     void testCheckAccess() {
         String projectId = "projectId";
         when(argoKubernetesService.isAccessible(projectId, "configmaps", "", Constants.CREATE_ACTION))
-            .thenReturn(true);
+                .thenReturn(true);
         assertTrue(transferService.checkImportAccess(projectId));
         verify(argoKubernetesService).isAccessible(anyString(), anyString(), anyString(), anyString());
-    }
-
-    @SneakyThrows
-    @Test
-    void testCopyJob() {
-        JsonNode GRAPH_JOB = new ObjectMapper().readTree(
-                "{\n" +
-                        "  \"graph\": [\n" +
-                        "    {\n" +
-                        "      \"value\": {\n" +
-                        "        \"jobId\": \"job1\",\n" +
-                        "        \"name\": \"testJob\",\n" +
-                        "        \"operation\": \"READ\"\n" +
-                        "      },\n" +
-                        "      \"id\": \"3\",\n" +
-                        "      \"vertex\": true\n" +
-                        "    }\n" +
-                        "  ]\n" +
-                        "}");
-        ConfigMap configMap1 = new ConfigMapBuilder()
-            .addToData(Map.of(Constants.EXECUTOR_MEMORY,
-                              "1G",
-                              Constants.DRIVER_MEMORY,
-                              "1G",
-                              Constants.JOB_CONFIG_PATH_FIELD,
-                              "test"))
-            .withNewMetadata()
-            .withName("jobId1")
-            .addToLabels(Constants.NAME, "jobName2")
-            .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-            .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String(GRAPH_JOB.toString().getBytes()))
-            .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
-            .endMetadata()
-            .build();
-        ConfigMap jobDataConfigMap1 = new ConfigMapBuilder()
-                .addToData(Map.of(Constants.JOB_CONFIG_FIELD, "{\"nodes\":[], \"edges\":[]}"))
-                .withNewMetadata()
-                .withName("jobId1-cfg")
-                .addToLabels(Constants.NAME, "jobName2")
-                .addToLabels(Constants.TYPE, Constants.TYPE_JOB_CONFIG)
-                .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
-                .endMetadata()
-                .build();
-
-        ConfigMap configMap2 = new ConfigMapBuilder()
-            .addToData(Map.of(Constants.EXECUTOR_MEMORY,
-                              "1G",
-                              Constants.DRIVER_MEMORY,
-                              "1G",
-                              Constants.JOB_CONFIG_PATH_FIELD,
-                              "test"))
-            .withNewMetadata()
-            .withName("jobId2")
-            .addToLabels(Constants.NAME, "jobName2-Copy")
-            .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-            .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String(GRAPH_JOB.toString().getBytes()))
-            .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
-            .endMetadata()
-            .build();
-        ConfigMap configMap3 = new ConfigMapBuilder()
-            .addToData(Map.of(Constants.EXECUTOR_MEMORY,
-                              "1G",
-                              Constants.DRIVER_MEMORY,
-                              "1G",
-                              Constants.JOB_CONFIG_PATH_FIELD,
-                              "test"))
-            .withNewMetadata()
-            .withName("jobId3")
-            .addToLabels(Constants.NAME, "jobName2-Copy2")
-            .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-            .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String(GRAPH_JOB.toString().getBytes()))
-            .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
-            .endMetadata()
-            .build();
-        ConfigMap configMap4 = new ConfigMapBuilder()
-            .addToData(Map.of(Constants.EXECUTOR_MEMORY,
-                              "1G",
-                              Constants.DRIVER_MEMORY,
-                              "1G",
-                              Constants.JOB_CONFIG_PATH_FIELD,
-                              "test"))
-            .withNewMetadata()
-            .withName("jobId4")
-            .addToLabels(Constants.NAME, "jobName2-Copy3")
-            .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-            .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String(GRAPH_JOB.toString().getBytes()))
-            .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
-            .endMetadata()
-            .build();
-        List<ConfigMap> configMaps = new ArrayList<>();
-        configMaps.add(configMap1);
-        when(argoKubernetesService.getAllConfigMaps(anyString())).thenReturn(configMaps);
-
-        for (ConfigMap wf : List.of(configMap2, configMap3)) {
-            ConfigMap original = SerializationUtils.clone(configMap1);
-            when(argoKubernetesService.getConfigMap("projectId", original.getMetadata().getName()))
-                .thenReturn(original);
-            when(argoKubernetesService.getConfigMap("projectId", String.format("%s-cfg", original.getMetadata().getName())))
-                    .thenReturn(jobDataConfigMap1);
-            transferService.copyJob("projectId", original.getMetadata().getName());
-            assertEquals(wf.getMetadata().getLabels().get(Constants.NAME),
-                         original.getMetadata().getLabels().get(Constants.NAME),
-                         "Copy suffix should be exactly the same");
-            assertNotEquals(wf.getMetadata().getName(),
-                            original.getMetadata().getName(),
-                            "Ids should be different");
-            configMaps.add(wf);
-        }
-        configMaps.remove(1);
-        ConfigMap original = SerializationUtils.clone(configMap1);
-        when(argoKubernetesService.getConfigMap("projectId", original.getMetadata().getName()))
-            .thenReturn(original);
-        when(argoKubernetesService.getConfigMap("projectId", String.format("%s-cfg", original.getMetadata().getName())))
-                .thenReturn(jobDataConfigMap1);
-        transferService.copyJob("projectId", original.getMetadata().getName());
-        assertEquals(configMap4.getMetadata().getLabels().get(Constants.NAME),
-                     original.getMetadata().getLabels().get(Constants.NAME),
-                     "Copy suffix should be exactly the same even after deletion");
-        assertNotEquals(configMap4.getMetadata().getName(),
-                        original.getMetadata().getName(),
-                        "Ids should be different even after deletion");
-        configMaps.add(configMap4);
-    }
-
-    @Test
-    void testCopyPipeline() {
-        WorkflowTemplate workflowTemplate1 = new WorkflowTemplate();
-        workflowTemplate1.setMetadata(new ObjectMetaBuilder()
-                                          .withName("pipelineId1")
-                                          .addToLabels(Constants.NAME, "pipelineName1")
-                                          .addToAnnotations(Constants.DEFINITION,
-                                                            Base64.encodeBase64String("GRAPH".getBytes()))
-                                          .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
-                                          .build());
-        workflowTemplate1.setSpec(new WorkflowTemplateSpec().templates(List.of(new Template()
-                                                                                   .name("dagTemplate")
-                                                                                   .dag(new DagTemplate().addTasksItem(
-                                                                                       new DagTask().arguments(new Arguments()
-                                                                                                                   .addParametersItem(
-                                                                                                                       new Parameter()
-                                                                                                                           .name(
-                                                                                                                               K8sUtils.CONFIGMAP)
-                                                                                                                           .value(
-                                                                                                                               "jobFromPipeline")))))))
-                                                            .pipelineParams(
-                                                                    PipelineParams.builder()
-                                                                            .tags(Arrays.asList("VF-Demo", "VF-Migration"))
-                                                                            .slack(SlackNotification.builder()
-                                                                                    .successNotify(false)
-                                                                                    .failureNotify(false)
-                                                                                    .channels(List.of())
-                                                                                    .recipients(List.of())
-                                                                                    .build())
-                                                                            .email(EmailNotification.builder()
-                                                                                    .successNotify(false)
-                                                                                    .failureNotify(false)
-                                                                                    .recipients(List.of())
-                                                                                    .build())
-                                                                            .dependentPipelineIds(Set.of("pipelineId"))
-                                                                            .build()
-                                                            )
-        );
-        WorkflowTemplate workflowTemplate2 = new WorkflowTemplate();
-        workflowTemplate2.setMetadata(new ObjectMetaBuilder()
-                                          .withName("pipelineId2")
-                                          .addToLabels(Constants.NAME, "pipelineName1-Copy")
-                                          .addToAnnotations(Constants.DEFINITION,
-                                                            Base64.encodeBase64String("GRAPH".getBytes()))
-                                          .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
-                                          .build());
-        workflowTemplate2.setSpec(new WorkflowTemplateSpec().templates(List.of(new Template()
-                                                                                   .name("dagTemplate")
-                                                                                   .dag(new DagTemplate().addTasksItem(
-                                                                                       new DagTask().arguments(new Arguments()
-                                                                                                                   .addParametersItem(
-                                                                                                                       new Parameter()
-                                                                                                                           .name(
-                                                                                                                               K8sUtils.CONFIGMAP)
-                                                                                                                           .value(
-                                                                                                                               "jobFromPipeline")))))))
-                                                            .pipelineParams(
-                                                                    PipelineParams.builder()
-                                                                            .tags(Arrays.asList("VF-Demo", "VF-Migration"))
-                                                                            .slack(SlackNotification.builder()
-                                                                                    .successNotify(false)
-                                                                                    .failureNotify(false)
-                                                                                    .channels(List.of())
-                                                                                    .recipients(List.of())
-                                                                                    .build())
-                                                                            .email(EmailNotification.builder()
-                                                                                    .successNotify(false)
-                                                                                    .failureNotify(false)
-                                                                                    .recipients(List.of())
-                                                                                    .build())
-                                                                            .dependentPipelineIds(Set.of())
-                                                                            .build()
-                                                            ));
-
-        WorkflowTemplate workflowTemplate3 = new WorkflowTemplate();
-        workflowTemplate3.setMetadata(new ObjectMetaBuilder()
-                                          .withName("pipelineId3")
-                                          .addToLabels(Constants.NAME, "pipelineName1-Copy2")
-                                          .addToAnnotations(Constants.DEFINITION,
-                                                            Base64.encodeBase64String("GRAPH".getBytes()))
-                                          .addToAnnotations(Constants.LAST_MODIFIED, "lastModified")
-                                          .build());
-        workflowTemplate3.setSpec(new WorkflowTemplateSpec().templates(List.of(new Template()
-                                                                                   .name("dagTemplate")
-                                                                                   .dag(new DagTemplate().addTasksItem(
-                                                                                       new DagTask().arguments(new Arguments()
-                                                                                                                   .addParametersItem(
-                                                                                                                       new Parameter()
-                                                                                                                           .name(
-                                                                                                                               K8sUtils.CONFIGMAP)
-                                                                                                                           .value(
-                                                                                                                               "jobFromPipeline")))))))
-                                                            .pipelineParams(
-                                                                    PipelineParams.builder()
-                                                                            .tags(Arrays.asList("VF-Demo", "VF-Migration"))
-                                                                            .slack(SlackNotification.builder()
-                                                                                    .successNotify(false)
-                                                                                    .failureNotify(false)
-                                                                                    .channels(List.of())
-                                                                                    .recipients(List.of())
-                                                                                    .build())
-                                                                            .email(EmailNotification.builder()
-                                                                                    .successNotify(false)
-                                                                                    .failureNotify(false)
-                                                                                    .recipients(List.of())
-                                                                                    .build())
-                                                                            .dependentPipelineIds(Set.of("pipelineId"))
-                                                                            .build()
-                                                            ));
-        List<WorkflowTemplate> workflowTemplates = new ArrayList<>();
-        workflowTemplates.add(workflowTemplate1);
-        when(argoKubernetesService.getAllWorkflowTemplates(anyString())).thenReturn(workflowTemplates);
-
-        for (WorkflowTemplate wf : List.of(workflowTemplate2, workflowTemplate3)) {
-            WorkflowTemplate original = SerializationUtils.clone(workflowTemplate1);
-            when(argoKubernetesService.getWorkflowTemplate("projectId", original.getMetadata().getName()))
-                .thenReturn(original);
-            transferService.copyPipeline("projectId", original.getMetadata().getName());
-            assertEquals(wf.getMetadata().getLabels().get(Constants.NAME),
-                         original.getMetadata().getLabels().get(Constants.NAME),
-                         "Copy suffix should be exactly the same");
-            assertNotEquals(wf.getMetadata().getName(),
-                            original.getMetadata().getName(),
-                            "Ids should be different");
-            workflowTemplates.add(wf);
-        }
-
     }
 }

@@ -51,7 +51,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 @SpringBootTest
 class VfApiApplicationTest {
-    private final static KubernetesMockServer K8S_SERVER = new KubernetesMockServer();
+    private static final KubernetesMockServer K8S_SERVER = new KubernetesMockServer();
     @Autowired
     private ProjectController projectController;
     @Autowired

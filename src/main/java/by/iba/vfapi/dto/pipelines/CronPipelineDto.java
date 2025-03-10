@@ -19,14 +19,14 @@
 
 package by.iba.vfapi.dto.pipelines;
 
-import by.iba.vfapi.model.argo.CronWorkflowSpec;
 import io.swagger.v3.oas.annotations.media.Schema;
-import javax.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+
+import javax.validation.constraints.NotNull;
 
 /**
  * CRON pipeline DTO class.
@@ -43,8 +43,4 @@ public class CronPipelineDto {
     private String schedule;
     @Schema(description = "If true Workflow scheduling will not occur")
     private boolean suspend;
-
-    public static CronPipelineDto fromSpec(CronWorkflowSpec cronWorkflowSpec) {
-        return new CronPipelineDto(cronWorkflowSpec.getSchedule(), cronWorkflowSpec.isSuspend());
-    }
 }

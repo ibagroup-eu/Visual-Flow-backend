@@ -19,14 +19,15 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.common.LoadFilePodBuilderService;
+import by.iba.vfapi.config.ApplicationConfigurationProperties;
 import by.iba.vfapi.dao.LogRepositoryImpl;
 import by.iba.vfapi.dao.PipelineHistoryRepository;
-import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.model.history.AbstractHistory;
 import by.iba.vfapi.services.auth.AuthenticationService;
+import io.fabric8.kubernetes.api.model.StatusBuilder;
 import io.fabric8.kubernetes.api.model.WatchEvent;
 import io.fabric8.kubernetes.api.model.WatchEventBuilder;
-import io.fabric8.kubernetes.api.model.StatusBuilder;
 import io.fabric8.kubernetes.client.server.mock.KubernetesServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,15 +38,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.net.HttpURLConnection;
 
-import static org.mockito.Mockito.when;
-
 @ExtendWith(MockitoExtension.class)
 class WorkflowServiceTest {
     private final KubernetesServer server = new KubernetesServer();
-    private static final String APP_NAME = "vf";
-    private static final String APP_NAME_LABEL = "testApp";
-    private static final String PVC_MOUNT_PATH = "/files";
-    private static final String IMAGE_PULL_SECRET = "vf-dev-image-pull";
     private static final Long EVENT_WAIT_PERIOD_MS = 10L;
 
     @Mock
@@ -57,18 +52,20 @@ class WorkflowServiceTest {
     @Mock
     private LogRepositoryImpl logRepository;
     private WorkflowService workflowService;
+    @Mock
+    private ApplicationConfigurationProperties appProperties;
+    @Mock
+    private LoadFilePodBuilderService filePodService;
 
     @BeforeEach
     void setUp() {
         server.before();
         this.argoKubernetesService = new ArgoKubernetesService(
+            appProperties,
             server.getClient(),
-            APP_NAME,
-            APP_NAME_LABEL,
-            PVC_MOUNT_PATH,
-            IMAGE_PULL_SECRET,
             authenticationServiceMock,
-            logRepository
+            logRepository,
+            filePodService
         );
         this.workflowService = new WorkflowService(argoKubernetesService, historyRepository);
     }
@@ -80,8 +77,6 @@ class WorkflowServiceTest {
 
     @Test
     void testTrackWorkflowEvents() {
-        mockAuthenticationService();
-
         server.expect()
             .withPath("/apis/argoproj.io/v1alpha1/namespaces/vf/workflows?fieldSelector=metadata.name%3Dwf&watch=true")
             .andUpgradeToWebSocket()
@@ -92,12 +87,6 @@ class WorkflowServiceTest {
             .once();
 
         workflowService.trackWorkflowEvents("vf", "wf");
-    }
-
-    private void mockAuthenticationService() {
-        UserInfo ui = new UserInfo();
-        ui.setSuperuser(true);
-        when(authenticationServiceMock.getUserInfo()).thenReturn(ui);
     }
 
     private static WatchEvent outdatedEvent() {

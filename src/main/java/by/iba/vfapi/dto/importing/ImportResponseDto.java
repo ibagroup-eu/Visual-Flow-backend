@@ -22,12 +22,13 @@ package by.iba.vfapi.dto.importing;
 import by.iba.vfapi.config.OpenApiConfig;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Schema;
-import java.util.List;
-import java.util.Map;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
+
+import java.util.List;
+import java.util.Map;
 
 /**
  * Export response DTO class
@@ -45,6 +46,8 @@ public class ImportResponseDto {
     @ArraySchema(arraySchema = @Schema(description = "Ids of the pipelines that were not imported"), schema =
     @Schema(ref = OpenApiConfig.SCHEMA_KUBE_UUID_TWO))
     private final List<String> notImportedPipelines;
-    private final Map<String, List<EntityDto>> missingProjectParams;
-    private final Map<String, List<EntityDto>> missingProjectConnections;
+    private final Map<String, List<String>> errorsInJobs;
+    private final Map<String, List<String>> errorsInPipelines;
+    private final Map<String, List<MissingParamDto>> missingProjectParams;
+    private final Map<String, List<MissingParamDto>> missingProjectConnections;
 }

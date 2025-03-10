@@ -18,6 +18,7 @@
  */
 package by.iba.vfapi.controllers;
 
+import by.iba.vfapi.config.ApplicationConfigurationProperties;
 import by.iba.vfapi.dto.databases.PingStatusDto;
 import by.iba.vfapi.dto.projects.ConnectDto;
 import by.iba.vfapi.model.auth.UserInfo;
@@ -28,37 +29,48 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.Mockito;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.context.junit.jupiter.SpringExtension;
 import org.springframework.web.client.RestTemplate;
 import java.util.Objects;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, SpringExtension.class})
+@ContextConfiguration(initializers = ConfigDataApplicationContextInitializer.class)
+@EnableConfigurationProperties(value = ApplicationConfigurationProperties.class)
 class DatabasesControllerTest {
 
     @Mock
     private DatabasesService databasesService;
-    @Mock
-    private AuthenticationService authenticationService;
+    @Spy
+    private AuthenticationService authenticationService = new AuthenticationService();
     @Mock
     private RestTemplate restTemplate;
     private DatabasesController controller;
+    @Autowired
+    private ApplicationConfigurationProperties appProperties;
 
     @BeforeEach
     public void setUp() {
         controller = new DatabasesController(databasesService, authenticationService,
-                restTemplate, "host");
+                restTemplate, appProperties);
         UserInfo expected = new UserInfo();
         expected.setName("name");
         expected.setId("id");
         expected.setUsername("username");
         expected.setEmail("email");
-        when(authenticationService.getUserInfo()).thenReturn(expected);
+        when(authenticationService.getUserInfo()).thenReturn(Optional.of(expected));
     }
 
     @Test

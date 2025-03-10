@@ -20,12 +20,7 @@
 package by.iba.vfapi.dto.jobs;
 
 import by.iba.vfapi.config.OpenApiConfig;
-import by.iba.vfapi.dto.Constants;
 import by.iba.vfapi.dto.ResourceUsageDto;
-import by.iba.vfapi.services.DateTimeUtils;
-import by.iba.vfapi.services.K8sUtils;
-import io.fabric8.kubernetes.api.model.ContainerStateTerminated;
-import io.fabric8.kubernetes.api.model.Pod;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -52,22 +47,4 @@ public class PipelineJobOverviewDto {
     @Schema(ref = OpenApiConfig.SCHEMA_JOB_STATUS)
     private final String status;
     private final ResourceUsageDto usage;
-
-    /**
-     * Create PipelineJobOverviewDtoBuilder from pod.
-     *
-     * @param pod pod
-     * @return PipelineJobOverviewDtoBuilder
-     */
-    public static PipelineJobOverviewDto.PipelineJobOverviewDtoBuilder fromPod(Pod pod) {
-        return PipelineJobOverviewDto
-            .builder()
-            .id(pod.getMetadata().getName())
-            .pipelineId(pod.getMetadata().getLabels().get(Constants.PIPELINE_ID_LABEL))
-            .startedAt(DateTimeUtils.getFormattedDateTime(pod.getStatus().getStartTime()))
-            .finishedAt(DateTimeUtils.getFormattedDateTime(K8sUtils.extractTerminatedStateField(
-                pod.getStatus(),
-                ContainerStateTerminated::getFinishedAt)))
-            .status(pod.getStatus().getPhase());
-    }
 }

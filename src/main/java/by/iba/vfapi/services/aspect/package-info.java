@@ -17,25 +17,7 @@
  * limitations under the License.
  */
 
-package by.iba.vfapi.dto.importing;
-
-
-import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.Builder;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.ToString;
-
 /**
- * Entity response DTO class
+ * This package contains aspects related classes.
  */
-@Getter
-@Builder
-@EqualsAndHashCode
-@ToString
-@Schema(description = "DTO with information about missing project parameter")
-public class EntityDto {
-    private String id;
-    private String kind;
-    private String nodeId;
-}
+package by.iba.vfapi.services.aspect;

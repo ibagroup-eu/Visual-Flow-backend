@@ -56,6 +56,7 @@ superusers:
     # - github-nickname1
     # - nickname2
 notifications:
+  ui-host:                                        # UI Host (without context, f.g. /vf/ui)
   image:                                          # docker image in format repository:tag
   slack:
     token: ${TOKEN}                               # API token for slack app
@@ -90,6 +91,7 @@ namespace:
 pvc:
   memory: 1Gi                                     # amount of memory for PVC
   mountPath: /files                               # PVC mount path to upload/download files
+  image: busybox:stable                           # Load file pod's image. Default value is busybox:stable
   accessModes: ReadWriteMany, ReadWriteOnce, ReadOnlyMany, ReadWriteOncePod  # PVC access modes, separated by comma. One or more elements can be declared inside this param, but remember,
                                                   # that all declared modes will be passed into PVC initialization for storing files when creating new projects.
 job:
@@ -119,6 +121,7 @@ redis:
   username: ${REDIS_USER}                         # The connection username of Redis database.
   password: ${REDIS_PASSWORD}                     # The connection password of Redis database.
   database: ${REDIS_DATABASE}                     # The connection database name of Redis database ("0" - by default).
+  recordLogs: true/false                          # A flag that determines whether history will be written to the database or not (false - by default).
 # Kubernetes Client Http Logs
 # enables logging for kubernetes client
 # feel free to comment the whole block out if you don't need it

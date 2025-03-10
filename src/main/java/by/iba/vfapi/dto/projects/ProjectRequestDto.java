@@ -21,23 +21,23 @@ package by.iba.vfapi.dto.projects;
 
 import by.iba.vfapi.config.OpenApiConfig;
 import by.iba.vfapi.dto.Constants;
-import io.fabric8.kubernetes.api.model.NamespaceBuilder;
-import io.fabric8.kubernetes.api.model.NamespaceFluent;
 import io.swagger.v3.oas.annotations.media.Schema;
-import java.util.Map;
-import javax.validation.Valid;
-import javax.validation.constraints.NotNull;
-import javax.validation.constraints.Pattern;
-import javax.validation.constraints.Size;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
+import lombok.extern.slf4j.Slf4j;
+
+import javax.validation.Valid;
+import javax.validation.constraints.NotNull;
+import javax.validation.constraints.Pattern;
+import javax.validation.constraints.Size;
 
 /**
  * Project request DTO class.
  */
+@Slf4j
 @Getter
 @Setter
 @Builder(toBuilder = true)
@@ -56,21 +56,8 @@ public class ProjectRequestDto {
     @Valid
     @Schema(description = "Project's quota information")
     private ResourceQuotaRequestDto limits;
-
-    /**
-     * Converts Project DTO to namespace.
-     *
-     * @return namespace builder.
-     */
-    public NamespaceBuilder toNamespace(String id, Map<String, String> customAnnotations) {
-        NamespaceFluent.MetadataNested<NamespaceBuilder> namespaceBuilderMetadataNested =
-            new NamespaceBuilder().withNewMetadata().withName(id);
-        if (!customAnnotations.isEmpty()) {
-            namespaceBuilderMetadataNested.addToAnnotations(customAnnotations);
-        }
-        return namespaceBuilderMetadataNested
-            .addToAnnotations(Constants.NAME_FIELD, name)
-            .addToAnnotations(Constants.DESCRIPTION_FIELD, description)
-            .endMetadata();
-    }
+    private boolean isDemo;
+    @Valid
+    @Schema(description = "Demo Project's Limits")
+    private DemoLimitsDto demoLimits;
 }

@@ -19,6 +19,8 @@
 
 package by.iba.vfapi.dao;
 
+import by.iba.vfapi.config.redis.JobRedisConfig;
+import by.iba.vfapi.config.redis.RedisConfig;
 import by.iba.vfapi.model.history.JobHistory;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,7 +33,7 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public class JobHistoryRepository extends HistoryRepositoryImpl<JobHistory> implements InitializingBean {
-    private RedisTemplate<String, Object> redisTemplate;
+    private final RedisTemplate<String, Object> redisTemplate;
 
     /**
      * Constructor for class JobHistoryRepository.
@@ -39,8 +41,10 @@ public class JobHistoryRepository extends HistoryRepositoryImpl<JobHistory> impl
      * @param redisTemplate redisTemplate
      */
     @Autowired
-    public JobHistoryRepository(@Qualifier("jobRedisTemplate") RedisTemplate<String, Object> redisTemplate) {
+    public JobHistoryRepository(@Qualifier("jobRedisTemplate") RedisTemplate<String, Object> redisTemplate,
+                                JobRedisConfig redisConfig) {
         this.redisTemplate = redisTemplate;
+        this.redisConfig = redisConfig;
     }
 
     /**

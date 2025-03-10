@@ -19,18 +19,25 @@
 
 package by.iba.vfapi.services;
 
+import by.iba.vfapi.common.LoadFilePodBuilderService;
+import by.iba.vfapi.config.ApplicationConfigurationProperties;
 import by.iba.vfapi.dao.JobHistoryRepository;
 import by.iba.vfapi.dao.LogRepositoryImpl;
 import by.iba.vfapi.dto.Constants;
-import by.iba.vfapi.dto.projects.ParamDto;
-import by.iba.vfapi.dto.projects.ParamDataDto;
-import by.iba.vfapi.dto.projects.ParamsDto;
 import by.iba.vfapi.dto.projects.ConnectDto;
 import by.iba.vfapi.dto.projects.ConnectionsDto;
+import by.iba.vfapi.dto.projects.DemoLimitsDto;
+import by.iba.vfapi.dto.projects.ParamDataDto;
+import by.iba.vfapi.dto.projects.ParamDto;
+import by.iba.vfapi.dto.projects.ParamsDto;
 import by.iba.vfapi.dto.projects.ProjectRequestDto;
 import by.iba.vfapi.dto.projects.ResourceQuotaRequestDto;
 import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.services.auth.AuthenticationService;
+import by.iba.vfapi.services.utils.ConnectionUtils;
+import by.iba.vfapi.services.utils.K8sUtils;
+import by.iba.vfapi.services.utils.ParamUtils;
+import by.iba.vfapi.services.utils.ProjectUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.ConfigMap;
@@ -42,12 +49,12 @@ import io.fabric8.kubernetes.api.model.NamespaceBuilder;
 import io.fabric8.kubernetes.api.model.NamespaceList;
 import io.fabric8.kubernetes.api.model.NamespaceListBuilder;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
+import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
+import io.fabric8.kubernetes.api.model.PersistentVolumeClaimBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.PodListBuilder;
 import io.fabric8.kubernetes.api.model.PodStatus;
-import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
-import io.fabric8.kubernetes.api.model.PersistentVolumeClaimBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceQuota;
 import io.fabric8.kubernetes.api.model.ResourceQuotaBuilder;
@@ -73,14 +80,6 @@ import io.fabric8.kubernetes.api.model.rbac.RoleBindingBuilder;
 import io.fabric8.kubernetes.api.model.rbac.RoleBindingList;
 import io.fabric8.kubernetes.api.model.rbac.RoleBindingListBuilder;
 import io.fabric8.kubernetes.client.server.mock.KubernetesServer;
-import java.net.HttpURLConnection;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicBoolean;
-
 import org.apache.commons.codec.binary.Base64;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -88,31 +87,45 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
+import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.context.junit.jupiter.SpringExtension;
+
+import java.net.HttpURLConnection;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, SpringExtension.class})
+@ContextConfiguration(initializers = ConfigDataApplicationContextInitializer.class)
+@EnableConfigurationProperties(value = ApplicationConfigurationProperties.class)
 class KubernetesServiceTest {
-
-    private static final String APP_NAME = "vf";
     private static final String APP_NAME_LABEL = "testApp";
-    private static final String PVC_MOUNT_PATH = "/files";
-    private static final String IMAGE_PULL_SECRET = "vf-dev-image-pull";
     private static final Long EVENT_WAIT_PERIOD_MS = 10L;
-
     private final KubernetesServer server = new KubernetesServer();
-
     @Mock
     private AuthenticationService authenticationServiceMock;
-
     private KubernetesService kubernetesService;
+    @Autowired
+    private ApplicationConfigurationProperties appProperties;
+    @Mock
+    private LoadFilePodBuilderService filePodService;
 
     @BeforeEach
     void setUp() {
         server.before();
-        kubernetesService = new KubernetesService(
-            server.getClient(), APP_NAME, APP_NAME_LABEL, PVC_MOUNT_PATH, IMAGE_PULL_SECRET, authenticationServiceMock);
+        kubernetesService = new KubernetesService(appProperties, server.getClient(), authenticationServiceMock,
+                filePodService);
     }
 
     @AfterEach
@@ -123,30 +136,30 @@ class KubernetesServiceTest {
     private void mockAuthenticationService() {
         UserInfo ui = new UserInfo();
         ui.setSuperuser(true);
-        when(authenticationServiceMock.getUserInfo()).thenReturn(ui);
+        when(authenticationServiceMock.getUserInfo()).thenReturn(Optional.of(ui));
     }
 
     @Test
     void testGetNamespaces() {
         NamespaceList namespaceList = new NamespaceListBuilder()
-            .addNewItem()
-            .withNewMetadata()
-            .withName("vf-name1")
-            .endMetadata()
-            .endItem()
-            .addNewItem()
-            .withNewMetadata()
-            .withName("vf-name2")
-            .endMetadata()
-            .endItem()
-            .build();
+                .addNewItem()
+                .withNewMetadata()
+                .withName("vf-name1")
+                .endMetadata()
+                .endItem()
+                .addNewItem()
+                .withNewMetadata()
+                .withName("vf-name2")
+                .endMetadata()
+                .endItem()
+                .build();
 
         server
-            .expect()
-            .get()
-            .withPath("/api/v1/namespaces?labelSelector=app%3D" + APP_NAME_LABEL)
-            .andReturn(HttpURLConnection.HTTP_OK, namespaceList)
-            .once();
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces?labelSelector=app%3D" + APP_NAME_LABEL)
+                .andReturn(HttpURLConnection.HTTP_OK, namespaceList)
+                .once();
 
         List<Namespace> actual = kubernetesService.getNamespaces();
 
@@ -160,21 +173,21 @@ class KubernetesServiceTest {
         String namespace = "namespace";
 
         ResourceQuota expected = new ResourceQuotaBuilder()
-            .withNewMetadata()
-            .withNamespace(namespace)
-            .withName(Constants.QUOTA_NAME)
-            .endMetadata()
-            .withNewSpec()
-            .withHard(Map.of("cpu", Quantity.parse("20"), "memory", Quantity.parse("20G")))
-            .endSpec()
-            .build();
+                .withNewMetadata()
+                .withNamespace(namespace)
+                .withName(Constants.QUOTA_NAME)
+                .endMetadata()
+                .withNewSpec()
+                .withHard(Map.of("cpu", Quantity.parse("20"), "memory", Quantity.parse("20G")))
+                .endSpec()
+                .build();
 
         server
-            .expect()
-            .get()
-            .withPath("/api/v1/namespaces/namespace/resourcequotas/quota")
-            .andReturn(HttpURLConnection.HTTP_OK, expected)
-            .once();
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/namespace/resourcequotas/quota")
+                .andReturn(HttpURLConnection.HTTP_OK, expected)
+                .once();
 
         ResourceQuota result = kubernetesService.getResourceQuota(namespace, Constants.QUOTA_NAME);
 
@@ -188,21 +201,21 @@ class KubernetesServiceTest {
         String namespace = "namespace";
 
         ResourceQuotaRequestDto quotaDto = ResourceQuotaRequestDto
-            .builder()
-            .limitsCpu(20f)
-            .limitsMemory(20f)
-            .requestsCpu(20f)
-            .requestsMemory(20f)
-            .build();
+                .builder()
+                .limitsCpu(20f)
+                .limitsMemory(20f)
+                .requestsCpu(20f)
+                .requestsMemory(20f)
+                .build();
 
         server
-            .expect()
-            .post()
-            .withPath("/api/v1/namespaces/namespace/resourcequotas")
-            .andReturn(HttpURLConnection.HTTP_CREATED, null)
-            .once();
+                .expect()
+                .post()
+                .withPath("/api/v1/namespaces/namespace/resourcequotas")
+                .andReturn(HttpURLConnection.HTTP_CREATED, null)
+                .once();
 
-        kubernetesService.createOrReplaceResourceQuota(namespace, quotaDto.toResourceQuota().build());
+        kubernetesService.createOrReplaceResourceQuota(namespace, ProjectUtils.toResourceQuota(quotaDto).build());
     }
 
     @Test
@@ -212,13 +225,13 @@ class KubernetesServiceTest {
         ProjectRequestDto projectDto = ProjectRequestDto.builder().name("Namespace").description("").build();
 
         server
-            .expect()
-            .post()
-            .withPath("/api/v1/namespaces")
-            .andReturn(HttpURLConnection.HTTP_CREATED, null)
-            .once();
+                .expect()
+                .post()
+                .withPath("/api/v1/namespaces")
+                .andReturn(HttpURLConnection.HTTP_CREATED, null)
+                .once();
 
-        kubernetesService.createNamespace(projectDto.toNamespace("namespace", Map.of()).build());
+        kubernetesService.createNamespace(ProjectUtils.convertDtoToNamespace("namespace", projectDto, Map.of()).build());
     }
 
     @Test
@@ -229,22 +242,56 @@ class KubernetesServiceTest {
         String description = "newDescription";
 
         ProjectRequestDto projectDto = ProjectRequestDto.builder().name("Namespace").description("").build();
-        Namespace ns = projectDto.toNamespace("namespace", Map.of()).build();
+        Namespace ns = ProjectUtils.convertDtoToNamespace("namespace", projectDto, Map.of()).build();
 
         server
-            .expect()
-            .get()
-            .withPath("/api/v1/namespaces/namespace")
-            .andReturn(HttpURLConnection.HTTP_OK, ns)
-            .once();
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/namespace")
+                .andReturn(HttpURLConnection.HTTP_OK, ns)
+                .once();
         server
-            .expect()
-            .patch()
-            .withPath("/api/v1/namespaces/namespace")
-            .andReturn(HttpURLConnection.HTTP_OK, null)
-            .once();
+                .expect()
+                .patch()
+                .withPath("/api/v1/namespaces/namespace")
+                .andReturn(HttpURLConnection.HTTP_OK, null)
+                .once();
 
         kubernetesService.editDescription(namespace, description);
+    }
+
+    @Test
+    void testEditDemoLimits() {
+        mockAuthenticationService();
+
+        String namespace = "namespace";
+
+        ProjectRequestDto projectDto = ProjectRequestDto.builder()
+                .name(namespace).demoLimits(
+                        DemoLimitsDto.builder()
+                                .jobsNumAllowed(3)
+                                .build()
+                ).build();
+        Namespace ns = ProjectUtils.convertDtoToNamespace(namespace, projectDto, Map.of()).build();
+        DemoLimitsDto demoLimits = DemoLimitsDto.builder()
+                .expirationDate(LocalDate.now())
+                .jobsNumAllowed(8)
+                .build();
+
+        server
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/namespace")
+                .andReturn(HttpURLConnection.HTTP_OK, ns)
+                .once();
+        server
+                .expect()
+                .patch()
+                .withPath("/api/v1/namespaces/namespace")
+                .andReturn(HttpURLConnection.HTTP_OK, null)
+                .once();
+
+        kubernetesService.editDemoLimits(namespace, true, demoLimits);
     }
 
     @Test
@@ -252,25 +299,24 @@ class KubernetesServiceTest {
         mockAuthenticationService();
 
         String namespace = "namespace";
-        Secret expected = ParamsDto
-            .builder()
-            .params(List.of(ParamDto.builder()
-                    .key("test")
-                    .value(ParamDataDto.builder().text("val").build())
-                    .secret(false)
-                    .build()))
-            .build()
-            .toSecret()
-            .build();
+        Secret expected = ParamUtils.toSecret(ParamsDto
+                        .builder()
+                        .params(List.of(ParamDto.builder()
+                                .key("test")
+                                .value(ParamDataDto.builder().text("val").build())
+                                .secret(false)
+                                .build()))
+                        .build())
+                .build();
 
         server
-            .expect()
-            .get()
-            .withPath("/api/v1/namespaces/namespace/secrets/secret")
-            .andReturn(HttpURLConnection.HTTP_OK, expected)
-            .once();
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/namespace/secrets/secret")
+                .andReturn(HttpURLConnection.HTTP_OK, expected)
+                .once();
 
-        Secret result = kubernetesService.getSecret(namespace, ParamsDto.SECRET_NAME);
+        Secret result = kubernetesService.getSecret(namespace, ParamUtils.SECRET_NAME);
         assertEquals(expected, result, "Secret must be equals to expected");
     }
 
@@ -279,22 +325,21 @@ class KubernetesServiceTest {
         mockAuthenticationService();
 
         String namespace = "namespace";
-        Secret secret = ParamsDto
-            .builder()
-            .params(List.of(ParamDto.builder()
-                    .key("test")
-                    .value(ParamDataDto.builder().text("val").build())
-                    .secret(false).build()))
-            .build()
-            .toSecret()
-            .build();
+        Secret secret = ParamUtils.toSecret(ParamsDto
+                        .builder()
+                        .params(List.of(ParamDto.builder()
+                                .key("test")
+                                .value(ParamDataDto.builder().text("val").build())
+                                .secret(false).build()))
+                        .build())
+                .build();
 
         server
-            .expect()
-            .post()
-            .withPath("/api/v1/namespaces/namespace/secrets")
-            .andReturn(HttpURLConnection.HTTP_CREATED, null)
-            .once();
+                .expect()
+                .post()
+                .withPath("/api/v1/namespaces/namespace/secrets")
+                .andReturn(HttpURLConnection.HTTP_CREATED, null)
+                .once();
 
         kubernetesService.createOrReplaceSecret(namespace, secret);
     }
@@ -304,14 +349,13 @@ class KubernetesServiceTest {
         mockAuthenticationService();
 
         String namespace = "namespace";
-        Secret secret = ParamsDto
-                .builder()
-                .params(List.of(ParamDto.builder()
-                        .key("test")
-                        .value(ParamDataDto.builder().text("val2").build())
-                        .secret(false).build()))
-                .build()
-                .toSecret()
+        Secret secret = ParamUtils.toSecret(ParamsDto
+                        .builder()
+                        .params(List.of(ParamDto.builder()
+                                .key("test")
+                                .value(ParamDataDto.builder().text("val2").build())
+                                .secret(false).build()))
+                        .build())
                 .build();
         boolean expected = true;
 
@@ -331,13 +375,12 @@ class KubernetesServiceTest {
         mockAuthenticationService();
 
         String namespace = "namespace";
-        Secret expected = ConnectionsDto
-                    .builder()
-                    .connections(List.of(ConnectDto.builder().key("test")
-                            .value(new ObjectMapper().readTree("{\"name\": \"dsfsd\"}")).build()))
-                    .build()
-                    .toSecret()
-                    .build();
+        Secret expected = ConnectionUtils.toSecret(ConnectionsDto
+                        .builder()
+                        .connections(List.of(ConnectDto.builder().key("test")
+                                .value(new ObjectMapper().readTree("{\"name\": \"dsfsd\"}")).build()))
+                        .build())
+                .build();
 
         server
                 .expect()
@@ -346,7 +389,7 @@ class KubernetesServiceTest {
                 .andReturn(HttpURLConnection.HTTP_OK, expected)
                 .once();
 
-        Secret result = kubernetesService.getSecret(namespace, ConnectionsDto.SECRET_NAME);
+        Secret result = kubernetesService.getSecret(namespace, ConnectionUtils.SECRET_NAME);
         assertEquals(expected, result, "Connections must be equals to expected");
     }
 
@@ -355,13 +398,12 @@ class KubernetesServiceTest {
         mockAuthenticationService();
 
         String namespace = "namespace";
-        Secret secret = ConnectionsDto
-                    .builder()
-                    .connections(List.of(ConnectDto.builder().key("test")
-                            .value(new ObjectMapper().readTree("{\"name\": \"val1\"}")).build()))
-                    .build()
-                    .toSecret()
-                    .build();
+        Secret secret = ConnectionUtils.toSecret(ConnectionsDto
+                        .builder()
+                        .connections(List.of(ConnectDto.builder().key("test")
+                                .value(new ObjectMapper().readTree("{\"name\": \"val1\"}")).build()))
+                        .build())
+                .build();
 
         server
                 .expect()
@@ -378,14 +420,14 @@ class KubernetesServiceTest {
         mockAuthenticationService();
 
         ProjectRequestDto projectDto = ProjectRequestDto.builder().name("Project").description("desc").build();
-        Namespace expected = projectDto.toNamespace("project", Map.of()).build();
+        Namespace expected = ProjectUtils.convertDtoToNamespace("project", projectDto, Map.of()).build();
 
         server
-            .expect()
-            .get()
-            .withPath("/api/v1/namespaces/project")
-            .andReturn(HttpURLConnection.HTTP_OK, expected)
-            .once();
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/project")
+                .andReturn(HttpURLConnection.HTTP_OK, expected)
+                .once();
 
         Namespace namespaceByName = kubernetesService.getNamespace(expected.getMetadata().getName());
 
@@ -398,11 +440,11 @@ class KubernetesServiceTest {
         String namespaceName = "namespaceName";
 
         server
-            .expect()
-            .delete()
-            .withPath("/api/v1/namespaces/namespaceName")
-            .andReturn(HttpURLConnection.HTTP_OK, null)
-            .once();
+                .expect()
+                .delete()
+                .withPath("/api/v1/namespaces/namespaceName")
+                .andReturn(HttpURLConnection.HTTP_OK, null)
+                .once();
 
         kubernetesService.deleteNamespace(namespaceName);
     }
@@ -410,20 +452,20 @@ class KubernetesServiceTest {
     @Test
     void testGetRoles() {
         ClusterRoleList expected = new ClusterRoleListBuilder()
-            .addNewItem()
-            .withNewMetadata()
-            .withName("admin")
-            .addToLabels("vf-role", "true")
-            .endMetadata()
-            .endItem()
-            .build();
+                .addNewItem()
+                .withNewMetadata()
+                .withName("admin")
+                .addToLabels("vf-role", "true")
+                .endMetadata()
+                .endItem()
+                .build();
 
         server
-            .expect()
-            .get()
-            .withPath("/apis/rbac.authorization.k8s.io/v1/clusterroles?labelSelector=vf-role%3Dtrue")
-            .andReturn(HttpURLConnection.HTTP_OK, expected)
-            .once();
+                .expect()
+                .get()
+                .withPath("/apis/rbac.authorization.k8s.io/v1/clusterroles?labelSelector=vf-role%3Dtrue")
+                .andReturn(HttpURLConnection.HTTP_OK, expected)
+                .once();
 
         List<ClusterRole> actual = kubernetesService.getRoles();
         assertEquals(expected.getItems(), actual, "Roles must be equal to expected");
@@ -432,21 +474,21 @@ class KubernetesServiceTest {
     @Test
     void testGetServiceAccounts() {
         ServiceAccountList expected = new ServiceAccountListBuilder()
-            .addNewItem()
-            .withNewMetadata()
-            .withName("ivanshautsou")
-            .addToLabels("app", APP_NAME_LABEL)
-            .addToAnnotations(Map.of("username", "IvanShautsou", "id", "22", "name", "Ivan"))
-            .endMetadata()
-            .endItem()
-            .build();
+                .addNewItem()
+                .withNewMetadata()
+                .withName("ivanshautsou")
+                .addToLabels("app", APP_NAME_LABEL)
+                .addToAnnotations(Map.of("username", "IvanShautsou", "id", "22", "name", "Ivan"))
+                .endMetadata()
+                .endItem()
+                .build();
 
         server
-            .expect()
-            .get()
-            .withPath("/api/v1/namespaces/vf/serviceaccounts?labelSelector=app%3D"+ APP_NAME_LABEL)
-            .andReturn(HttpURLConnection.HTTP_OK, expected)
-            .once();
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/vf/serviceaccounts?labelSelector=app%3D" + APP_NAME_LABEL)
+                .andReturn(HttpURLConnection.HTTP_OK, expected)
+                .once();
 
         List<ServiceAccount> actual = kubernetesService.getServiceAccounts();
         assertEquals(expected.getItems(), actual, "ServiceAccounts must be equal to expected");
@@ -457,23 +499,23 @@ class KubernetesServiceTest {
         mockAuthenticationService();
 
         RoleBindingList expected = new RoleBindingListBuilder()
-            .addNewItem()
-            .withNewMetadata()
-            .withName("ivanshautsou-admin")
-            .addToAnnotations("username", "IvanShautsou")
-            .endMetadata()
-            .withNewRoleRef()
-            .withName("admin")
-            .endRoleRef()
-            .endItem()
-            .build();
+                .addNewItem()
+                .withNewMetadata()
+                .withName("ivanshautsou-admin")
+                .addToAnnotations("username", "IvanShautsou")
+                .endMetadata()
+                .withNewRoleRef()
+                .withName("admin")
+                .endRoleRef()
+                .endItem()
+                .build();
 
         server
-            .expect()
-            .get()
-            .withPath("/apis/rbac.authorization.k8s.io/v1/namespaces/name/rolebindings?labelSelector=app%3D" + APP_NAME_LABEL)
-            .andReturn(HttpURLConnection.HTTP_OK, expected)
-            .once();
+                .expect()
+                .get()
+                .withPath("/apis/rbac.authorization.k8s.io/v1/namespaces/name/rolebindings?labelSelector=app%3D" + APP_NAME_LABEL)
+                .andReturn(HttpURLConnection.HTTP_OK, expected)
+                .once();
 
         List<RoleBinding> actual = kubernetesService.getRoleBindings("name");
         assertEquals(expected.getItems(), actual, "RoleBindings must be equal to expected");
@@ -484,23 +526,23 @@ class KubernetesServiceTest {
         mockAuthenticationService();
 
         RoleBindingList expected = new RoleBindingListBuilder()
-            .addNewItem()
-            .withNewMetadata()
-            .withName("ivanshautsou-admin")
-            .addToAnnotations("username", "IvanShautsou")
-            .endMetadata()
-            .withNewRoleRef()
-            .withName("admin")
-            .endRoleRef()
-            .endItem()
-            .build();
+                .addNewItem()
+                .withNewMetadata()
+                .withName("ivanshautsou-admin")
+                .addToAnnotations("username", "IvanShautsou")
+                .endMetadata()
+                .withNewRoleRef()
+                .withName("admin")
+                .endRoleRef()
+                .endItem()
+                .build();
 
         server
-            .expect()
-            .delete()
-            .withPath("/apis/rbac.authorization.k8s.io/v1/namespaces/name/rolebindings/ivanshautsou-admin")
-            .andReturn(HttpURLConnection.HTTP_OK, null)
-            .once();
+                .expect()
+                .delete()
+                .withPath("/apis/rbac.authorization.k8s.io/v1/namespaces/name/rolebindings/ivanshautsou-admin")
+                .andReturn(HttpURLConnection.HTTP_OK, null)
+                .once();
 
         kubernetesService.deleteRoleBindings("name", expected.getItems());
     }
@@ -514,21 +556,21 @@ class KubernetesServiceTest {
         userInfo.setEmail("test@test.com");
 
         ServiceAccountList expected1 = new ServiceAccountListBuilder()
-            .addNewItem()
-            .withNewMetadata()
-            .withName("testuser")
-            .addToLabels("app", APP_NAME_LABEL)
-            .addToAnnotations(Map.of("username", "TestUser", "id", "22", "name", "Test", "email", "test@test.com"))
-            .endMetadata()
-            .endItem()
-            .build();
+                .addNewItem()
+                .withNewMetadata()
+                .withName("testuser")
+                .addToLabels("app", APP_NAME_LABEL)
+                .addToAnnotations(Map.of("username", "TestUser", "id", "22", "name", "Test", "email", "test@test.com"))
+                .endMetadata()
+                .endItem()
+                .build();
 
         server
-            .expect()
-            .get()
-            .withPath("/api/v1/namespaces/vf/serviceaccounts/testuser")
-            .andReturn(HttpURLConnection.HTTP_OK, expected1)
-            .once();
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/vf/serviceaccounts/testuser")
+                .andReturn(HttpURLConnection.HTTP_OK, expected1)
+                .once();
 
         kubernetesService.createIfNotExistServiceAccount(userInfo);
 
@@ -538,32 +580,32 @@ class KubernetesServiceTest {
                 .addNewSecret().withName("user-dockercfg-secret").endSecret()
                 .build();
         ServiceAccountList expected2 = new ServiceAccountListBuilder()
-            .withItems(sa)
-            .withNewMetadata()
-            .withResourceVersion("1")
-            .endMetadata()
-            .build();
+                .withItems(sa)
+                .withNewMetadata()
+                .withResourceVersion("1")
+                .endMetadata()
+                .build();
 
         server
-            .expect()
-            .get()
-            .withPath("/api/v1/namespaces/vf/serviceaccounts/testuser")
-            .andReturn(HttpURLConnection.HTTP_OK, null)
-            .once();
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/vf/serviceaccounts/testuser")
+                .andReturn(HttpURLConnection.HTTP_OK, null)
+                .once();
 
         server
-            .expect()
-            .post()
-            .withPath("/api/v1/namespaces/vf/serviceaccounts")
-            .andReturn(HttpURLConnection.HTTP_CREATED, sa)
-            .once();
+                .expect()
+                .post()
+                .withPath("/api/v1/namespaces/vf/serviceaccounts")
+                .andReturn(HttpURLConnection.HTTP_CREATED, sa)
+                .once();
 
         server
-            .expect()
-            .get()
-            .withPath("/api/v1/namespaces/vf/serviceaccounts?fieldSelector=metadata.name%3Dtestuser&watch=false")
-            .andReturn(HttpURLConnection.HTTP_OK, expected2)
-            .once();
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/vf/serviceaccounts?fieldSelector=metadata.name%3Dtestuser&watch=false")
+                .andReturn(HttpURLConnection.HTTP_OK, expected2)
+                .once();
 
         kubernetesService.createIfNotExistServiceAccount(userInfo);
     }
@@ -573,46 +615,46 @@ class KubernetesServiceTest {
         mockAuthenticationService();
 
         RoleBinding expected1 = new RoleBindingBuilder()
-            .editOrNewMetadata()
-            .addToAnnotations("username", "IvanShautsou")
-            .withName("ivanshautsou-admin")
-            .addToLabels("app", APP_NAME_LABEL)
-            .endMetadata()
-            .addNewSubject()
-            .withKind("ServiceAccount")
-            .withName("ivanshautsou")
-            .withNamespace("vf")
-            .endSubject()
-            .withNewRoleRef()
-            .withApiGroup("rbac.authorization.k8s.io")
-            .withKind("Role")
-            .withName("admin")
-            .endRoleRef()
-            .build();
+                .editOrNewMetadata()
+                .addToAnnotations("username", "IvanShautsou")
+                .withName("ivanshautsou-admin")
+                .addToLabels("app", APP_NAME_LABEL)
+                .endMetadata()
+                .addNewSubject()
+                .withKind("ServiceAccount")
+                .withName("ivanshautsou")
+                .withNamespace("vf")
+                .endSubject()
+                .withNewRoleRef()
+                .withApiGroup("rbac.authorization.k8s.io")
+                .withKind("Role")
+                .withName("admin")
+                .endRoleRef()
+                .build();
         RoleBinding expected2 = new RoleBindingBuilder()
-            .editOrNewMetadata()
-            .addToAnnotations("username", "AKachkan")
-            .withName("akachkan-admin")
-            .addToLabels("app", APP_NAME_LABEL)
-            .endMetadata()
-            .addNewSubject()
-            .withKind("ServiceAccount")
-            .withName("akachkan")
-            .withNamespace("vf")
-            .endSubject()
-            .withNewRoleRef()
-            .withApiGroup("rbac.authorization.k8s.io")
-            .withKind("Role")
-            .withName("admin")
-            .endRoleRef()
-            .build();
+                .editOrNewMetadata()
+                .addToAnnotations("username", "AKachkan")
+                .withName("akachkan-admin")
+                .addToLabels("app", APP_NAME_LABEL)
+                .endMetadata()
+                .addNewSubject()
+                .withKind("ServiceAccount")
+                .withName("akachkan")
+                .withNamespace("vf")
+                .endSubject()
+                .withNewRoleRef()
+                .withApiGroup("rbac.authorization.k8s.io")
+                .withKind("Role")
+                .withName("admin")
+                .endRoleRef()
+                .build();
 
         server
-            .expect()
-            .post()
-            .withPath("/apis/rbac.authorization.k8s.io/v1/namespaces/name1/rolebindings")
-            .andReturn(HttpURLConnection.HTTP_CREATED, null)
-            .times(2);
+                .expect()
+                .post()
+                .withPath("/apis/rbac.authorization.k8s.io/v1/namespaces/name1/rolebindings")
+                .andReturn(HttpURLConnection.HTTP_CREATED, null)
+                .times(2);
 
         kubernetesService.createRoleBindings("name1", List.of(expected1, expected2));
     }
@@ -622,21 +664,21 @@ class KubernetesServiceTest {
         String username = "IvanShautsou";
 
         ServiceAccount sa =
-            new ServiceAccountBuilder().addNewSecret().withName("user-secret-token").endSecret().build();
+                new ServiceAccountBuilder().addNewSecret().withName("user-secret-token").endSecret().build();
 
         server
-            .expect()
-            .get()
-            .withPath("/api/v1/namespaces/vf/serviceaccounts/ivanshautsou")
-            .andReturn(HttpURLConnection.HTTP_OK, sa)
-            .once();
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/vf/serviceaccounts/ivanshautsou")
+                .andReturn(HttpURLConnection.HTTP_OK, sa)
+                .once();
 
         server
-            .expect()
-            .get()
-            .withPath("/api/v1/namespaces/vf/secrets/user-secret-token")
-            .andReturn(HttpURLConnection.HTTP_OK, Optional.empty())
-            .once();
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/vf/secrets/user-secret-token")
+                .andReturn(HttpURLConnection.HTTP_OK, Optional.empty())
+                .once();
 
         kubernetesService.getServiceAccountSecret(username);
     }
@@ -646,14 +688,14 @@ class KubernetesServiceTest {
         mockAuthenticationService();
 
         SubjectAccessReview sa =
-            new SubjectAccessReviewBuilder().withNewStatus().withAllowed(true).endStatus().build();
+                new SubjectAccessReviewBuilder().withNewStatus().withAllowed(true).endStatus().build();
 
         server
-            .expect()
-            .post()
-            .withPath("/apis/authorization.k8s.io/v1/selfsubjectaccessreviews")
-            .andReturn(HttpURLConnection.HTTP_OK, sa)
-            .once();
+                .expect()
+                .post()
+                .withPath("/apis/authorization.k8s.io/v1/selfsubjectaccessreviews")
+                .andReturn(HttpURLConnection.HTTP_OK, sa)
+                .once();
 
         boolean result = kubernetesService.isAccessible("name1", "namespaces", "", "");
         assertTrue(result, "Must be true");
@@ -662,20 +704,20 @@ class KubernetesServiceTest {
     @Test
     void testTopPods() {
         List<PodMetrics> metrics = List.of(new PodMetricsBuilder()
-                                               .addToContainers(new ContainerMetricsBuilder()
-                                                                    .addToUsage(Constants.CPU_FIELD,
-                                                                                Quantity.parse("10"))
-                                                                    .addToUsage(Constants.MEMORY_FIELD,
-                                                                                Quantity.parse("50Gi"))
-                                                                    .build())
-                                               .build());
+                .addToContainers(new ContainerMetricsBuilder()
+                        .addToUsage(Constants.CPU_FIELD,
+                                Quantity.parse("10"))
+                        .addToUsage(Constants.MEMORY_FIELD,
+                                Quantity.parse("50Gi"))
+                        .build())
+                .build());
 
         server
-            .expect()
-            .get()
-            .withPath("/apis/metrics.k8s.io/v1beta1/namespaces/name1/pods")
-            .andReturn(HttpURLConnection.HTTP_OK, new PodMetricsListBuilder().addAllToItems(metrics).build())
-            .once();
+                .expect()
+                .get()
+                .withPath("/apis/metrics.k8s.io/v1beta1/namespaces/name1/pods")
+                .andReturn(HttpURLConnection.HTTP_OK, new PodMetricsListBuilder().addAllToItems(metrics).build())
+                .once();
 
         List<PodMetrics> result = kubernetesService.topPod("name1");
         assertEquals(metrics, result, "Pods must be equal to expected");
@@ -685,17 +727,17 @@ class KubernetesServiceTest {
     void testTopPod() {
         PodMetrics metrics = new PodMetricsBuilder()
 
-            .addToContainers(new ContainerMetricsBuilder()
-                                 .addToUsage(Constants.CPU_FIELD, Quantity.parse("10"))
-                                 .addToUsage(Constants.MEMORY_FIELD, Quantity.parse("50Gi"))
-                                 .build()).build();
+                .addToContainers(new ContainerMetricsBuilder()
+                        .addToUsage(Constants.CPU_FIELD, Quantity.parse("10"))
+                        .addToUsage(Constants.MEMORY_FIELD, Quantity.parse("50Gi"))
+                        .build()).build();
 
         server
-            .expect()
-            .get()
-            .withPath("/apis/metrics.k8s.io/v1beta1/namespaces/name1/pods/id1")
-            .andReturn(HttpURLConnection.HTTP_OK, metrics)
-            .once();
+                .expect()
+                .get()
+                .withPath("/apis/metrics.k8s.io/v1beta1/namespaces/name1/pods/id1")
+                .andReturn(HttpURLConnection.HTTP_OK, metrics)
+                .once();
 
         PodMetrics result = kubernetesService.topPod("name1", "id1");
         assertEquals(metrics, result, "Pod must be equals to expected");
@@ -706,20 +748,20 @@ class KubernetesServiceTest {
         mockAuthenticationService();
 
         SubjectAccessReview sa =
-            new SubjectAccessReviewBuilder().withNewStatus().withAllowed(true).endStatus().build();
+                new SubjectAccessReviewBuilder().withNewStatus().withAllowed(true).endStatus().build();
 
         server
-            .expect()
-            .post()
-            .withPath("/apis/authorization.k8s.io/v1/selfsubjectaccessreviews")
-            .andReturn(HttpURLConnection.HTTP_OK, sa)
-            .once();
+                .expect()
+                .post()
+                .withPath("/apis/authorization.k8s.io/v1/selfsubjectaccessreviews")
+                .andReturn(HttpURLConnection.HTTP_OK, sa)
+                .once();
 
         boolean result = kubernetesService.isViewable(new NamespaceBuilder()
-                                                          .withNewMetadata()
-                                                          .withName("name1")
-                                                          .endMetadata()
-                                                          .build());
+                .withNewMetadata()
+                .withName("name1")
+                .endMetadata()
+                .build());
         assertTrue(result, "Must be true");
     }
 
@@ -728,21 +770,21 @@ class KubernetesServiceTest {
         mockAuthenticationService();
 
         ConfigMap configMap = new ConfigMapBuilder()
-            .addToData(Map.of("key", "data"))
-            .withMetadata(new ObjectMetaBuilder()
-                              .withName("id")
-                              .addToLabels(Constants.NAME, "name")
-                              .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-                              .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String("data".getBytes()))
-                              .build())
-            .build();
+                .addToData(Map.of("key", "data"))
+                .withMetadata(new ObjectMetaBuilder()
+                        .withName("id")
+                        .addToLabels(Constants.NAME, "name")
+                        .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
+                        .addToAnnotations(Constants.DEFINITION, Base64.encodeBase64String("data".getBytes()))
+                        .build())
+                .build();
 
         server
-            .expect()
-            .post()
-            .withPath("/api/v1/namespaces/vf/configmaps")
-            .andReturn(HttpURLConnection.HTTP_CREATED, null)
-            .once();
+                .expect()
+                .post()
+                .withPath("/api/v1/namespaces/vf/configmaps")
+                .andReturn(HttpURLConnection.HTTP_CREATED, null)
+                .once();
 
         kubernetesService.createOrReplaceConfigMap("vf", configMap);
     }
@@ -752,11 +794,11 @@ class KubernetesServiceTest {
         mockAuthenticationService();
 
         server
-            .expect()
-            .delete()
-            .withPath("/api/v1/namespaces/vf/pods/pod")
-            .andReturn(HttpURLConnection.HTTP_OK, null)
-            .once();
+                .expect()
+                .delete()
+                .withPath("/api/v1/namespaces/vf/pods/pod")
+                .andReturn(HttpURLConnection.HTTP_OK, null)
+                .once();
 
         kubernetesService.deletePod("vf", "pod");
     }
@@ -766,11 +808,11 @@ class KubernetesServiceTest {
         mockAuthenticationService();
 
         server
-            .expect()
-            .delete()
-            .withPath("/api/v1/namespaces/vf/pods?labelSelector=type%pod")
-            .andReturn(HttpURLConnection.HTTP_OK, null)
-            .once();
+                .expect()
+                .delete()
+                .withPath("/api/v1/namespaces/vf/pods?labelSelector=type%pod")
+                .andReturn(HttpURLConnection.HTTP_OK, null)
+                .once();
 
         kubernetesService.deletePodsByLabels("vf", Map.of("type", "pod"));
     }
@@ -780,26 +822,26 @@ class KubernetesServiceTest {
         mockAuthenticationService();
 
         ConfigMapList configMapList = new ConfigMapListBuilder()
-            .addNewItem()
-            .withNewMetadata()
-            .withName("cm1")
-            .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-            .endMetadata()
-            .endItem()
-            .addNewItem()
-            .withNewMetadata()
-            .withName("cm2")
-            .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-            .endMetadata()
-            .endItem()
-            .build();
+                .addNewItem()
+                .withNewMetadata()
+                .withName("cm1")
+                .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
+                .endMetadata()
+                .endItem()
+                .addNewItem()
+                .withNewMetadata()
+                .withName("cm2")
+                .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
+                .endMetadata()
+                .endItem()
+                .build();
 
         server
-            .expect()
-            .get()
-            .withPath("/api/v1/namespaces/vf/configmaps?labelSelector=type%3Djob")
-            .andReturn(HttpURLConnection.HTTP_OK, configMapList)
-            .once();
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/vf/configmaps?labelSelector=type%3Djob")
+                .andReturn(HttpURLConnection.HTTP_OK, configMapList)
+                .once();
 
         List<ConfigMap> actual = kubernetesService.getAllConfigMaps("vf");
 
@@ -810,18 +852,18 @@ class KubernetesServiceTest {
     void testGetConfigMap() {
         mockAuthenticationService();
         ConfigMap configMap = new ConfigMapBuilder()
-            .withNewMetadata()
-            .withName("cm1")
-            .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-            .endMetadata()
-            .build();
+                .withNewMetadata()
+                .withName("cm1")
+                .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
+                .endMetadata()
+                .build();
 
         server
-            .expect()
-            .get()
-            .withPath("/api/v1/namespaces/vf/configmaps/cm1")
-            .andReturn(HttpURLConnection.HTTP_OK, configMap)
-            .once();
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/vf/configmaps/cm1")
+                .andReturn(HttpURLConnection.HTTP_OK, configMap)
+                .once();
 
         ConfigMap actual = kubernetesService.getConfigMap("vf", "cm1");
 
@@ -832,21 +874,21 @@ class KubernetesServiceTest {
     void testGetConfigMapsByLabels() {
         mockAuthenticationService();
         ConfigMapList configMapList = new ConfigMapListBuilder()
-            .addNewItem()
-            .withMetadata(new ObjectMetaBuilder()
-                              .withName("cm1")
-                              .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
-                              .addToLabels(Constants.NAME, "name1")
-                              .build())
-            .endItem()
-            .build();
+                .addNewItem()
+                .withMetadata(new ObjectMetaBuilder()
+                        .withName("cm1")
+                        .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
+                        .addToLabels(Constants.NAME, "name1")
+                        .build())
+                .endItem()
+                .build();
 
         server
-            .expect()
-            .get()
-            .withPath("/api/v1/namespaces/vf/configmaps?labelSelector=name%3Dname1")
-            .andReturn(HttpURLConnection.HTTP_OK, configMapList)
-            .once();
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/vf/configmaps?labelSelector=name%3Dname1")
+                .andReturn(HttpURLConnection.HTTP_OK, configMapList)
+                .once();
 
         List<ConfigMap> actual = kubernetesService.getConfigMapsByLabels("vf", Map.of(Constants.NAME, "name1"));
 
@@ -854,20 +896,44 @@ class KubernetesServiceTest {
     }
 
     @Test
+    void testGetConfigMapByLabel() {
+        mockAuthenticationService();
+        ConfigMapList configMapList = new ConfigMapListBuilder()
+                .addNewItem()
+                .withMetadata(new ObjectMetaBuilder()
+                        .withName("cm1")
+                        .addToLabels(Constants.TYPE, Constants.TYPE_JOB)
+                        .addToLabels(Constants.NAME, "name1")
+                        .build())
+                .endItem()
+                .build();
+        server
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/vf/configmaps?labelSelector=name%3Dname1")
+                .andReturn(HttpURLConnection.HTTP_OK, configMapList)
+                .once();
+
+        ConfigMap actual = kubernetesService.getConfigMapByLabel("vf", Constants.NAME, "name1");
+
+        assertEquals(configMapList.getItems().get(0), actual, "ConfigMap must be equal to expected");
+    }
+
+    @Test
     void testGetPodsByLabels() {
         Pod pod = new PodBuilder()
-            .withMetadata(new ObjectMetaBuilder()
-                              .withName("cm1")
-                              .addToLabels(Constants.JOB_ID_LABEL, "name1")
-                              .build())
-            .build();
+                .withMetadata(new ObjectMetaBuilder()
+                        .withName("cm1")
+                        .addToLabels(Constants.JOB_ID_LABEL, "name1")
+                        .build())
+                .build();
 
         server
-            .expect()
-            .get()
-            .withPath("/api/v1/namespaces/vf/pods?labelSelector=jobId%3Dname1")
-            .andReturn(HttpURLConnection.HTTP_OK, new PodListBuilder().addToItems(pod).build())
-            .once();
+                .expect()
+                .get()
+                .withPath("/api/v1/namespaces/vf/pods?labelSelector=jobId%3Dname1")
+                .andReturn(HttpURLConnection.HTTP_OK, new PodListBuilder().addToItems(pod).build())
+                .once();
 
         List<Pod> actual = kubernetesService.getPodsByLabels("vf", Map.of(Constants.JOB_ID_LABEL, "name1"));
 
@@ -879,11 +945,11 @@ class KubernetesServiceTest {
         mockAuthenticationService();
 
         server
-            .expect()
-            .delete()
-            .withPath("/api/v1/namespaces/namespaceName/configmaps?labelSelector=id%3Dcm1")
-            .andReturn(HttpURLConnection.HTTP_OK, null)
-            .once();
+                .expect()
+                .delete()
+                .withPath("/api/v1/namespaces/namespaceName/configmaps?labelSelector=id%3Dcm1")
+                .andReturn(HttpURLConnection.HTTP_OK, null)
+                .once();
 
         kubernetesService.deleteConfigMap("namespaceName", "cm1");
     }
@@ -891,11 +957,11 @@ class KubernetesServiceTest {
     @Test
     void testCreateRoleBinding() {
         server
-            .expect()
-            .post()
-            .withPath("/apis/rbac.authorization.k8s.io/v1beta1/namespaces/vf/rolebindings")
-            .andReturn(HttpURLConnection.HTTP_OK, null)
-            .once();
+                .expect()
+                .post()
+                .withPath("/apis/rbac.authorization.k8s.io/v1beta1/namespaces/vf/rolebindings")
+                .andReturn(HttpURLConnection.HTTP_OK, null)
+                .once();
 
         RoleBinding rb = new RoleBindingBuilder().build();
 
@@ -907,11 +973,11 @@ class KubernetesServiceTest {
         RoleBinding rb = new RoleBindingBuilder().build();
 
         server
-            .expect()
-            .get()
-            .withPath("/apis/rbac.authorization.k8s.io/v1beta1/namespaces/vf/rolebindings/id")
-            .andReturn(HttpURLConnection.HTTP_OK, rb)
-            .once();
+                .expect()
+                .get()
+                .withPath("/apis/rbac.authorization.k8s.io/v1beta1/namespaces/vf/rolebindings/id")
+                .andReturn(HttpURLConnection.HTTP_OK, rb)
+                .once();
 
         kubernetesService.getRoleBinding("vf", "id");
     }
@@ -1017,12 +1083,11 @@ class KubernetesServiceTest {
     void testCreatePod() {
         mockAuthenticationService();
 
-        Pod pod = new PodBuilder()
+        PodBuilder pod = new PodBuilder()
                 .withMetadata(new ObjectMetaBuilder()
                         .withName("pod1")
                         .addToLabels(K8sUtils.APP, "vf-dev")
-                        .build())
-                .build();
+                        .build());
 
         server
                 .expect()
@@ -1040,8 +1105,8 @@ class KubernetesServiceTest {
 
         ServiceAccount serviceAccount = new ServiceAccountBuilder()
                 .withMetadata(new ObjectMetaBuilder()
-                    .withName("sa")
-                    .build())
+                        .withName("sa")
+                        .build())
                 .build();
 
         server
@@ -1058,7 +1123,7 @@ class KubernetesServiceTest {
     void testGetUniqueEntityName() {
         String name = UUID.randomUUID().toString();
         AtomicBoolean firstTime = new AtomicBoolean(true);
-        String actual = KubernetesService.getUniqueEntityName((String secName) -> {
+        String actual = K8sUtils.getUniqueEntityName((String secName) -> {
             if (firstTime.get()) {
                 firstTime.set(false);
                 return name;
@@ -1100,30 +1165,30 @@ class KubernetesServiceTest {
         PodStatus podStatus = new PodStatus();
         podStatus.setPhase(K8sUtils.SUCCEEDED_STATUS);
         Pod pod = new PodBuilder()
-            .withNewMetadata()
-            .withNamespace("vf")
-            .withName("pod1")
-            .addToLabels(Constants.TYPE, "job")
-            .addToLabels(Constants.STARTED_BY, "test_user")
-            .withResourceVersion("1")
-            .endMetadata()
-            .withStatus(podStatus)
-            .build();
+                .withNewMetadata()
+                .withNamespace("vf")
+                .withName("pod1")
+                .addToLabels(Constants.TYPE, "job")
+                .addToLabels(Constants.STARTED_BY, "test_user")
+                .withResourceVersion("1")
+                .endMetadata()
+                .withStatus(podStatus)
+                .build();
         CountDownLatch latch = mock(CountDownLatch.class);
         JobHistoryRepository historyRepository = mock(JobHistoryRepository.class);
         LogRepositoryImpl logRepository = mock(LogRepositoryImpl.class);
 
         server.expect()
-            .withPath("/api/v1/namespaces/vf/pods?fieldSelector=metadata.name%3Dpod1&watch=true")
-            .andUpgradeToWebSocket()
-            .open()
-            .waitFor(EVENT_WAIT_PERIOD_MS)
-            .andEmit(new WatchEvent(pod, "MODIFIED"))
-            .done()
-            .once();
+                .withPath("/api/v1/namespaces/vf/pods?fieldSelector=metadata.name%3Dpod1&watch=true")
+                .andUpgradeToWebSocket()
+                .open()
+                .waitFor(EVENT_WAIT_PERIOD_MS)
+                .andEmit(new WatchEvent(pod, "MODIFIED"))
+                .done()
+                .once();
 
         assertNotNull(kubernetesService.watchPod("vf", "pod1", historyRepository, logRepository, latch),
-    "Should return Watch event");
+                "Should return Watch event");
     }
 
     @Test

@@ -21,10 +21,8 @@ package by.iba.vfapi.controllers;
 
 import by.iba.vfapi.config.OpenApiConfig;
 import by.iba.vfapi.dto.history.HistoryResponseDto;
-import by.iba.vfapi.dto.jobs.JobOverviewDto;
+import by.iba.vfapi.dto.jobs.JobDto;
 import by.iba.vfapi.dto.jobs.JobOverviewListDto;
-import by.iba.vfapi.dto.jobs.JobRequestDto;
-import by.iba.vfapi.dto.jobs.JobResponseDto;
 import by.iba.vfapi.services.JobService;
 import by.iba.vfapi.services.auth.AuthenticationService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -32,8 +30,6 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import java.util.List;
-import javax.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -44,7 +40,11 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import javax.validation.Valid;
+import java.util.List;
 
 /**
  * Job controller class.
@@ -69,12 +69,9 @@ public class JobController {
     public JobOverviewListDto getAll(@PathVariable String projectId) {
         LOGGER.info(
             "{} - Receiving all jobs in project '{}'",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+            authenticationService.getFormattedUserInfo(),
             projectId);
-        //TODO replace full method body on "return jobService.getAll(projectId)" and remove method transform
-        JobOverviewListDto jobs = jobService.getAll(projectId);
-
-        return JobOverviewDto.withPipelineJobs(jobs);
+        return jobService.getAll(projectId);
     }
 
     /**
@@ -89,15 +86,15 @@ public class JobController {
         @Schema(ref = OpenApiConfig.SCHEMA_UUID_ONE)))})
     @PostMapping("{projectId}/job")
     public ResponseEntity<String> create(
-        @PathVariable String projectId, @Valid @RequestBody JobRequestDto jobRequestDto) {
+        @PathVariable String projectId, @Valid @RequestBody JobDto jobRequestDto) {
         LOGGER.info(
             "{} - Creating new job in project '{}'",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+            authenticationService.getFormattedUserInfo(),
             projectId);
         String id = jobService.create(projectId, jobRequestDto);
         LOGGER.info(
             "{} - Job '{}' in project '{}' successfully created",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+            authenticationService.getFormattedUserInfo(),
             id,
             projectId);
         return ResponseEntity.status(HttpStatus.CREATED).body(id);
@@ -113,16 +110,16 @@ public class JobController {
     @Operation(summary = "Update existing job", description = "Update existing job with a new structure")
     @PostMapping("{projectId}/job/{id}")
     public void update(
-        @PathVariable String projectId, @PathVariable String id, @Valid @RequestBody JobRequestDto jobRequestDto) {
+        @PathVariable String projectId, @PathVariable String id, @Valid @RequestBody JobDto jobRequestDto) {
         LOGGER.info(
             "{} - Updating job '{}' in project '{}'",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+            authenticationService.getFormattedUserInfo(),
             id,
             projectId);
         jobService.update(id, projectId, jobRequestDto);
         LOGGER.info(
             "{} - Job '{}' in project '{}' successfully updated",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+            authenticationService.getFormattedUserInfo(),
             id,
             projectId);
     }
@@ -136,13 +133,13 @@ public class JobController {
      */
     @Operation(summary = "Get information about the job", description = "Fetch job's structure by id")
     @GetMapping("{projectId}/job/{id}")
-    public JobResponseDto get(@PathVariable String projectId, @PathVariable String id) {
+    public JobDto get(@PathVariable String projectId, @PathVariable String id) {
         LOGGER.info(
             "{} - Receiving job '{}' in project '{}'",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+            authenticationService.getFormattedUserInfo(),
             id,
             projectId);
-        return jobService.get(projectId, id);
+        return jobService.getById(projectId, id);
     }
 
     /**
@@ -158,13 +155,13 @@ public class JobController {
     public ResponseEntity<Void> delete(@PathVariable String projectId, @PathVariable String id) {
         LOGGER.info(
             "{} - Deleting '{}' job in project '{}'",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+            authenticationService.getFormattedUserInfo(),
             id,
             projectId);
         jobService.delete(projectId, id);
         LOGGER.info(
             "{} - Job '{}' in project '{}' successfully deleted",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+            authenticationService.getFormattedUserInfo(),
             id,
             projectId);
         return ResponseEntity.noContent().build();
@@ -182,7 +179,7 @@ public class JobController {
     public List<HistoryResponseDto> getHistory(@PathVariable String projectId, @PathVariable String id) {
         LOGGER.info(
                 "{} - Receiving job '{}' history in project '{}'",
-                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+                authenticationService.getFormattedUserInfo(),
                 id,
                 projectId);
         return jobService.getJobHistory(projectId, id);
@@ -193,21 +190,27 @@ public class JobController {
      *
      * @param projectId project id
      * @param id        job id
+     * @return pod uuid
      */
     @Operation(summary = "Run the job", description = "Create a new pod with configuration to execute a spark-job")
     @PostMapping("{projectId}/job/{id}/run")
-    public void run(@PathVariable String projectId, @PathVariable String id) {
+    public ResponseEntity<String> run(@PathVariable String projectId,
+                                      @PathVariable String id,
+                                      @RequestParam(required = false) boolean interactive) {
         LOGGER.info(
-            "{} - Running job '{}' in project '{}'",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+            "{} - Running job '{}' in project '{}' ({})",
+            authenticationService.getFormattedUserInfo(),
             id,
-            projectId);
-        jobService.run(projectId, id);
+            projectId,
+            interactive);
+        String runId = jobService.run(projectId, id, interactive);
         LOGGER.info(
-            "{} - Job '{}' in project '{}' successfully started",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+            "{} - Job '{}' in project '{}' successfully started with uuid '{}'",
+            authenticationService.getFormattedUserInfo(),
             id,
-            projectId);
+            projectId,
+            runId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(runId);
     }
 
     /**
@@ -221,13 +224,13 @@ public class JobController {
     public void stop(@PathVariable String projectId, @PathVariable String id) {
         LOGGER.info(
             "{} - Stopping job '{}' in project '{}'",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+            authenticationService.getFormattedUserInfo(),
             id,
             projectId);
         jobService.stop(projectId, id);
         LOGGER.info(
             "{} - Job '{}' in project '{}' successfully stopped",
-            AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
+            authenticationService.getFormattedUserInfo(),
             id,
             projectId);
     }
@@ -235,15 +238,33 @@ public class JobController {
     /**
      * Method for recalculating all params using in all jobs. It may take some time to make a full
      * recalculation.
-     * @param id is a project id.
+     *
+     * @param projectId is a project id.
      * @return true, if recalculation completed successfully.
      */
-    @PostMapping("/{id}/recalc/jobs")
-    public boolean recalculateParamsJobUsages(@PathVariable final String id) {
+    @PostMapping("/{projectId}/recalc/jobs")
+    public boolean recalculateParamsJobUsages(@PathVariable final String projectId) {
         LOGGER.info(
                 "{} - Recalculation params job usages for the project '{}'",
-                AuthenticationService.getFormattedUserInfo(authenticationService.getUserInfo()),
-                id);
-        return jobService.recalculateParamsJobUsages(id);
+                authenticationService.getFormattedUserInfo(),
+                projectId);
+        return jobService.recalculateParamsJobUsages(projectId);
+    }
+
+    /**
+     * Copies job.
+     *
+     * @param projectId project id
+     * @param jobId     job id
+     */
+    @Operation(summary = "Copy the job", description = "Make a job copy within the same project")
+    @PostMapping("{projectId}/job/{jobId}/copy")
+    public void copy(@PathVariable String projectId, @PathVariable String jobId) {
+        LOGGER.info(
+                "{} - Copying job '{}' in project '{}'",
+                authenticationService.getFormattedUserInfo(),
+                jobId,
+                projectId);
+        jobService.copy(projectId, jobId);
     }
 }

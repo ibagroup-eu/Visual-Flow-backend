@@ -19,7 +19,8 @@
 
 package by.iba.vfapi.config.redis;
 
-import org.springframework.beans.factory.annotation.Value;
+import by.iba.vfapi.config.ApplicationConfigurationProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -30,19 +31,22 @@ import org.springframework.data.redis.core.RedisTemplate;
  * Configuration class for JobRedisConfig.
  */
 @Configuration
-public class JobRedisConfig extends RedisConfig {
-    @Value("${redis.jobHistoryDatabase}")
-    private Integer database = null;
+public class JobRedisConfig extends RedisConfig<Object> {
+
+    @Autowired
+    public JobRedisConfig(ApplicationConfigurationProperties appProperties) {
+        super(appProperties, Object.class);
+    }
 
     /**
      * Configure redis connection factory for job's history.
      *
-     * @return
+     * @return JedisConnectionFactory
      */
     @Primary
     @Bean
     public JedisConnectionFactory jobRedisConnectionFactory() {
-        return jedisConnectionFactory(database);
+        return jedisConnectionFactory(appProperties.getRedis().getJobHistoryDatabase());
     }
 
     /**
@@ -51,12 +55,7 @@ public class JobRedisConfig extends RedisConfig {
      * @return instance of RedisTemplate
      */
     @Bean(name = "jobRedisTemplate")
-    public RedisTemplate jobRedisTemplate() {
-        RedisTemplate<String, Object> redisTemplate = new RedisTemplate<>();
-        redisTemplate.setConnectionFactory(jobRedisConnectionFactory());
-        setSerializer(redisTemplate);
-        redisTemplate.afterPropertiesSet();
-
-        return redisTemplate;
+    public RedisTemplate<String, Object> jobRedisTemplate() {
+        return createRedisTemplate(jobRedisConnectionFactory());
     }
 }

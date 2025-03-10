@@ -19,16 +19,17 @@
 
 package by.iba.vfapi.dto.importing;
 
-import by.iba.vfapi.model.argo.WorkflowTemplate;
-import io.fabric8.kubernetes.api.model.ConfigMap;
+import by.iba.vfapi.dto.jobs.JobDto;
+import by.iba.vfapi.dto.pipelines.PipelineDto;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Schema;
-import java.util.List;
-import javax.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+
+import javax.validation.constraints.NotNull;
+import java.util.List;
 
 /**
  * Export request DTO class.
@@ -41,8 +42,8 @@ import lombok.Setter;
 public class ImportRequestDto {
     @NotNull
     @ArraySchema(arraySchema = @Schema(description = "List of pipelines' structures"))
-    private List<WorkflowTemplate> pipelines;
+    private List<PipelineDto> pipelines;
     @NotNull
     @ArraySchema(arraySchema = @Schema(description = "List of jobs' structures"))
-    private List<ConfigMap> jobs;
+    private List<JobDto> jobs;
 }

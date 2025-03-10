@@ -25,22 +25,19 @@ import by.iba.vfapi.model.auth.UserInfo;
 import by.iba.vfapi.services.KubernetesService;
 import by.iba.vfapi.services.auth.AuthenticationService;
 import by.iba.vfapi.services.auth.OAuthService;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.util.Set;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.lang.NonNull;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+
 import javax.servlet.FilterChain;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.MediaType;
-import org.springframework.lang.NonNull;
-import org.springframework.security.authentication.AuthenticationServiceException;
-import org.springframework.security.core.AuthenticationException;
-import org.springframework.stereotype.Component;
-import org.springframework.web.filter.OncePerRequestFilter;
+import java.io.IOException;
+import java.util.Set;
 
 /**
  * Filter for extracting token from every request
@@ -87,7 +84,7 @@ public class JWTAuthenticationFilter extends OncePerRequestFilter {
         try {
             String token = httpServletRequest.getHeader(AUTHORIZATION_HEADER);
             if (token == null) {
-                throw new AuthenticationServiceException("Empty token");
+                LOGGER.debug("Did not find the token, ignoring the request");
             } else {
                 token = token.replace(BEARER_PREFIX, "");
 
@@ -101,11 +98,11 @@ public class JWTAuthenticationFilter extends OncePerRequestFilter {
                 authenticationService.setUserInfo(userInfo);
 
                 LOGGER.info(
-                    "{} has been successfully authenticated in k8s",
-                    AuthenticationService.getFormattedUserInfo(userInfo));
-
-                filterChain.doFilter(httpServletRequest, httpServletResponse);
+                        "{} has been successfully authenticated in k8s",
+                        AuthenticationService.getFormattedUserInfo(userInfo));
             }
+            filterChain.doFilter(httpServletRequest, httpServletResponse);
+
         } catch (AuthenticationException e) {
             LOGGER.error("Authentication exception", e);
             httpServletResponse.setStatus(HttpServletResponse.SC_UNAUTHORIZED);

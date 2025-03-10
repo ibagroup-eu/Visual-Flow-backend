@@ -57,9 +57,11 @@ public class WorkflowService {
     @Async
     @SneakyThrows
     public void trackWorkflowEvents(final String projectId, final String pipelineId) {
-        CountDownLatch latch = new CountDownLatch(1);
-        Watch watch = argoKubernetesService.watchWorkflow(projectId, pipelineId, historyRepository, latch);
-        latch.await();
-        watch.close();
+        if(historyRepository.recordLogs()) {
+            CountDownLatch latch = new CountDownLatch(1);
+            Watch watch = argoKubernetesService.watchWorkflow(projectId, pipelineId, historyRepository, latch);
+            latch.await();
+            watch.close();
+        }
     }
 }
